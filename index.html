@@ -1,0 +1,719 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>逆転アクセラルーム</title>
+<style>
+:root {
+  --main:#207B97;--sub:#33A6C4;--light:#B7DDED;--lb:#EBF6FA;
+  --dk:#104854;--cta:#F3A12C;
+  --w:#FFFFFF;--g0:#F0F5F8;--g1:#E0ECF1;--g3:#9DBAC6;
+  --t0:#0D2B35;--t1:#3A5E6C;--t2:#7A96A1;
+  --green:#22C55E;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{font-family:-apple-system,'Hiragino Sans','Yu Gothic UI','Meiryo',sans-serif;background:var(--g0);color:var(--t0);min-height:100vh;font-size:14px;line-height:1.5}
+button{font-family:inherit;cursor:pointer;border:none;outline:none}
+input,textarea{font-family:inherit;outline:none;border:none}
+.hidden{display:none!important}
+.screen{min-height:100vh;display:flex;flex-direction:column}
+.hdr{background:var(--dk);padding:12px 16px;display:flex;align-items:center;justify-content:space-between;gap:8px;position:sticky;top:0;z-index:100}
+.hdr-logo{display:flex;align-items:center;gap:8px}
+.hdr-icon{width:28px;height:28px;border-radius:7px;background:var(--cta);display:flex;align-items:center;justify-content:center;font-weight:900;font-size:14px;color:var(--dk);flex-shrink:0}
+.hdr-title{color:var(--w);font-weight:800;font-size:15px;letter-spacing:.02em}
+.hdr-sub{color:var(--light);font-size:10px}
+.hdr-right{display:flex;align-items:center;gap:8px;flex-shrink:0}
+.live-badge{background:rgba(34,197,94,.15);border:1px solid rgba(34,197,94,.35);border-radius:20px;padding:4px 10px;display:flex;align-items:center;gap:5px}
+.live-dot{width:6px;height:6px;border-radius:50%;background:var(--green);animation:pulse 2s ease-in-out infinite}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(34,197,94,.4)}50%{box-shadow:0 0 0 5px rgba(34,197,94,0)}}
+.live-num{color:var(--w);font-weight:800;font-size:14px}
+.live-lbl{color:rgba(255,255,255,.6);font-size:11px}
+.btn-logout{background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);color:rgba(255,255,255,.8);padding:5px 12px;border-radius:20px;font-size:11px;font-weight:600}
+#screen-login{background:var(--dk);justify-content:center;align-items:center;padding:24px 20px}
+.login-card{background:var(--w);border-radius:24px;padding:32px 24px;width:100%;max-width:400px;box-shadow:0 20px 60px rgba(0,0,0,.25)}
+.login-logo{text-align:center;margin-bottom:28px}
+.login-logo .icon{width:64px;height:64px;border-radius:18px;background:var(--cta);display:flex;align-items:center;justify-content:center;font-weight:900;font-size:30px;color:var(--dk);margin:0 auto 12px}
+.login-logo h1{font-size:20px;font-weight:900;color:var(--dk);margin-bottom:4px}
+.login-logo p{font-size:12px;color:var(--t2)}
+.login-live{background:var(--dk);border-radius:14px;padding:14px;text-align:center;margin-bottom:24px}
+.login-live-n{font-size:40px;font-weight:900;color:var(--w);line-height:1}
+.login-live-lbl{font-size:11px;color:var(--light);margin-top:4px}
+.login-input-wrap{margin-bottom:16px}
+.input-lbl{font-size:11px;color:var(--t2);font-weight:600;margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em}
+.code-input{width:100%;padding:14px 16px;border-radius:12px;border:2px solid var(--g1);font-size:18px;font-weight:700;letter-spacing:.1em;color:var(--t0);background:var(--g0);text-align:center;transition:border-color .2s}
+.code-input:focus{border-color:var(--main)}
+.btn-login{width:100%;padding:16px;border-radius:14px;background:var(--cta);color:var(--dk);font-weight:900;font-size:17px;box-shadow:0 4px 16px rgba(243,161,44,.4);transition:all .2s;margin-bottom:12px}
+.btn-login:active{transform:scale(.97);opacity:.9}
+.login-note{text-align:center;font-size:12px;color:var(--t2)}
+.login-tagline{text-align:center;font-size:13px;font-weight:700;color:var(--main);margin-top:20px;padding-top:20px;border-top:1px solid var(--g1)}
+.err-msg{background:#FEE2E2;color:#C52B2B;border-radius:10px;padding:10px 14px;font-size:13px;margin-bottom:12px;display:none}
+#screen-dash{background:var(--g0)}
+.dash-body{padding:12px;display:flex;flex-direction:column;gap:10px;max-width:520px;margin:0 auto}
+.card{background:var(--w);border-radius:16px;padding:16px;border:1px solid var(--g1)}
+.card-title{font-size:10px;color:var(--t2);font-weight:700;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px}
+.timer-card{background:var(--w);border-radius:16px;padding:20px 16px;border:1px solid var(--g1)}
+.subj-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px}
+.subj-chip{padding:6px 12px;border-radius:20px;border:1.5px solid var(--g1);background:var(--g0);font-size:12px;color:var(--t1);font-weight:600;transition:all .15s}
+.subj-chip.active{background:var(--lb);border-color:var(--light);color:var(--main)}
+.timer-display{font-size:52px;font-weight:900;text-align:center;letter-spacing:.04em;font-variant-numeric:tabular-nums;line-height:1;margin:8px 0 6px;transition:color .3s}
+.timer-active{color:var(--main)}
+.timer-idle{color:var(--g3)}
+.timer-sub{text-align:center;font-size:12px;color:var(--t2);margin-bottom:14px;min-height:18px}
+.btn-enter{width:100%;padding:16px;border-radius:14px;background:var(--cta);color:var(--dk);font-weight:900;font-size:17px;box-shadow:0 4px 16px rgba(243,161,44,.35);transition:all .2s}
+.btn-enter:active{transform:scale(.97)}
+.btn-exit{width:100%;padding:16px;border-radius:14px;background:#FEE2E2;color:#C52B2B;font-weight:900;font-size:17px;transition:all .2s}
+.entry-status{background:var(--lb);border-radius:10px;padding:8px 12px;display:flex;align-items:center;gap:6px;margin-bottom:10px;font-size:12px;color:var(--main);font-weight:600}
+.entry-dot{width:7px;height:7px;border-radius:50%;background:var(--green);animation:pulse 2s infinite}
+.progress-card{}
+.prog-top{display:flex;align-items:center;gap:16px;margin-bottom:14px}
+.ring-wrap{position:relative;flex-shrink:0}
+.ring-svg{transform:rotate(-90deg)}
+.ring-bg{fill:none;stroke:var(--g1);stroke-width:8}
+.ring-fill{fill:none;stroke:var(--cta);stroke-width:8;stroke-linecap:round;transition:stroke-dashoffset .8s ease}
+.ring-center{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.ring-pct{font-size:20px;font-weight:900;color:var(--t0)}
+.ring-pct-lbl{font-size:9px;color:var(--t2)}
+.prog-info{flex:1}
+.prog-nums{font-size:22px;font-weight:900;color:var(--t0)}
+.prog-nums span{font-size:13px;color:var(--t2);font-weight:400}
+.prog-remain{font-size:13px;color:var(--main);font-weight:600;margin-top:4px}
+.prog-remain.done{color:var(--green)}
+.prog-goal-btn{font-size:11px;color:var(--t2);background:none;border:1px solid var(--g1);border-radius:20px;padding:3px 10px;margin-top:6px}
+.week-bars{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+.day-col{display:flex;flex-direction:column;align-items:center;gap:3px}
+.bar-wrap{height:48px;display:flex;align-items:flex-end;width:100%}
+.bar{width:100%;border-radius:4px 4px 0 0;background:var(--light);min-height:3px;transition:height .5s ease}
+.bar.today-bar{background:var(--main)}
+.bar.empty-bar{background:var(--g1)}
+.day-lbl{font-size:10px;color:var(--t2);font-weight:600}
+.day-lbl.today-lbl{color:var(--main);font-weight:800}
+.day-mins{font-size:9px;color:var(--t2)}
+.streak-card{}
+.streak-top{display:flex;align-items:center;gap:12px;margin-bottom:12px}
+.streak-num{font-size:42px;font-weight:900;color:var(--cta);line-height:1}
+.streak-unit{font-size:16px;font-weight:700;color:var(--t0)}
+.streak-level{display:inline-flex;align-items:center;gap:5px;background:var(--lb);color:var(--main);border-radius:20px;padding:4px 12px;font-size:12px;font-weight:700;margin-top:4px}
+.streak-dots{display:flex;gap:6px;flex-wrap:wrap}
+.s-dot{width:28px;height:28px;border-radius:50%;background:var(--g1);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--t2)}
+.s-dot.done{background:var(--green);color:var(--w)}
+.s-dot.today{background:var(--main);color:var(--w);box-shadow:0 0 0 3px rgba(32,123,151,.25)}
+.stats-row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.stat-mini{background:var(--w);border-radius:14px;padding:14px;border:1px solid var(--g1)}
+.stat-mini-n{font-size:26px;font-weight:900;color:var(--main)}
+.stat-mini-lbl{font-size:11px;color:var(--t2);margin-top:2px}
+.feed-card{}
+.feed-post{display:flex;gap:10px;padding:6px 0;border-bottom:1px solid var(--g1)}
+.feed-post:last-child{border-bottom:none;padding-bottom:0}
+.feed-av{width:32px;height:32px;border-radius:50%;background:var(--sub);display:flex;align-items:center;justify-content:center;color:var(--w);font-weight:800;font-size:12px;flex-shrink:0}
+.feed-body{flex:1;min-width:0}
+.feed-meta{font-size:11px;color:var(--t2);margin-bottom:2px}
+.feed-msg{font-size:13px;color:var(--t0);word-break:break-all}
+.action-row{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding-bottom:16px}
+.btn-action{padding:14px 8px;border-radius:14px;border:1.5px solid var(--g1);background:var(--w);color:var(--main);font-size:13px;font-weight:700;display:flex;flex-direction:column;align-items:center;gap:4px}
+.btn-action-icon{font-size:22px}
+.btn-consult{border-color:var(--light);background:var(--lb)}
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:flex-end;justify-content:center;z-index:200;opacity:0;pointer-events:none;transition:opacity .25s}
+.modal-overlay.open{opacity:1;pointer-events:all}
+.modal-box{background:var(--w);border-radius:24px 24px 0 0;padding:24px 20px 36px;width:100%;max-width:520px;transform:translateY(100%);transition:transform .3s ease}
+.modal-overlay.open .modal-box{transform:translateY(0)}
+.modal-title{font-size:17px;font-weight:800;color:var(--t0);margin-bottom:4px}
+.modal-sub{font-size:12px;color:var(--t2);margin-bottom:16px}
+.modal-input{width:100%;padding:12px 14px;border-radius:12px;border:2px solid var(--g1);font-size:14px;color:var(--t0);background:var(--g0);resize:none;transition:border-color .2s}
+.modal-input:focus{border-color:var(--main)}
+.modal-btns{display:flex;gap:8px;margin-top:14px}
+.btn-cancel{flex:1;padding:13px;border-radius:12px;border:1.5px solid var(--g1);background:none;color:var(--t1);font-size:14px;font-weight:700}
+.btn-submit{flex:2;padding:13px;border-radius:12px;background:var(--cta);color:var(--dk);font-size:14px;font-weight:900;box-shadow:0 3px 10px rgba(243,161,44,.3)}
+.modal-range-wrap{margin:10px 0}
+.modal-range{width:100%;height:6px;appearance:none;background:var(--g1);border-radius:3px;outline:none}
+.modal-range::-webkit-slider-thumb{appearance:none;width:22px;height:22px;border-radius:50%;background:var(--cta);box-shadow:0 2px 6px rgba(243,161,44,.4)}
+.range-val{text-align:center;font-size:28px;font-weight:900;color:var(--main);margin:8px 0}
+.range-unit{font-size:14px;color:var(--t2)}
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(80px);background:var(--dk);color:var(--w);padding:12px 24px;border-radius:40px;font-size:13px;font-weight:700;z-index:300;opacity:0;transition:all .35s ease;white-space:nowrap;pointer-events:none}
+.toast.show{transform:translateX(-50%) translateY(0);opacity:1}
+.loading-overlay{position:fixed;inset:0;background:rgba(16,72,84,.7);display:flex;align-items:center;justify-content:center;z-index:400}
+.spinner{width:48px;height:48px;border:4px solid rgba(255,255,255,.2);border-top-color:var(--cta);border-radius:50%;animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+
+<div id="screen-login" class="screen">
+  <div class="login-card">
+    <div class="login-logo">
+      <div class="icon">🎯</div>
+      <h1>逆転アクセラルーム</h1>
+      <p>大学受験オンライン自習室</p>
+    </div>
+    <div class="login-live">
+      <div style="font-size:10px;color:var(--light);letter-spacing:.1em;text-transform:uppercase;margin-bottom:6px;display:flex;align-items:center;justify-content:center;gap:5px">
+        <div class="live-dot"></div>LIVE 今勉強中
+      </div>
+      <div class="login-live-n" id="login-live-num">—</div>
+      <div class="login-live-lbl">人が頑張っています</div>
+    </div>
+    <div class="login-input-wrap">
+      <div class="input-lbl">生徒コード</div>
+      <input id="code-input" class="code-input" type="text" placeholder="例）ST2024001" autocomplete="off" autocapitalize="characters">
+    </div>
+    <div id="login-err" class="err-msg"></div>
+    <button class="btn-login" onclick="login()">入室する →</button>
+    <div class="login-note">生徒コードは塾からお知らせしています</div>
+    <div class="login-tagline">今日も逆転しよう 💪</div>
+  </div>
+</div>
+
+<div id="screen-dash" class="screen hidden">
+  <div class="hdr">
+    <div class="hdr-logo">
+      <div class="hdr-icon">🎯</div>
+      <div>
+        <div class="hdr-title">逆転アクセラルーム</div>
+        <div id="hdr-name" class="hdr-sub">—</div>
+      </div>
+    </div>
+    <div class="hdr-right">
+      <div class="live-badge">
+        <div class="live-dot"></div>
+        <span class="live-num" id="hdr-live-num">—</span>
+        <span class="live-lbl">人</span>
+      </div>
+      <button class="btn-logout" onclick="confirmLogout()">退出</button>
+    </div>
+  </div>
+
+  <div class="dash-body">
+    <div class="timer-card">
+      <div class="card-title">学習タイマー</div>
+      <div id="subj-chips" class="subj-chips">
+        <button class="subj-chip active" onclick="selSubj(this)">数学</button>
+        <button class="subj-chip" onclick="selSubj(this)">英語</button>
+        <button class="subj-chip" onclick="selSubj(this)">現代文</button>
+        <button class="subj-chip" onclick="selSubj(this)">古文</button>
+        <button class="subj-chip" onclick="selSubj(this)">理科</button>
+        <button class="subj-chip" onclick="selSubj(this)">社会</button>
+        <button class="subj-chip" onclick="selSubj(this)">その他</button>
+      </div>
+      <div id="timer-disp" class="timer-display timer-idle">00:00:00</div>
+      <div id="timer-sub" class="timer-sub">科目を選んで入室しましょう</div>
+      <div id="entry-status" class="entry-status hidden">
+        <div class="entry-dot"></div>
+        <span id="entry-subj-lbl">勉強中</span>
+      </div>
+      <button id="btn-main-action" class="btn-enter" onclick="toggleSession()">入室する →</button>
+    </div>
+
+    <div class="stats-row">
+      <div class="stat-mini">
+        <div class="stat-mini-n" id="stat-today">0<span style="font-size:16px">分</span></div>
+        <div class="stat-mini-lbl">今日の勉強時間</div>
+      </div>
+      <div class="stat-mini">
+        <div class="stat-mini-n" id="stat-total">0<span style="font-size:14px">h</span></div>
+        <div class="stat-mini-lbl">累計勉強時間</div>
+      </div>
+    </div>
+
+    <div class="card progress-card">
+      <div class="card-title">今週の学習</div>
+      <div class="prog-top">
+        <div class="ring-wrap">
+          <svg class="ring-svg" width="88" height="88" viewBox="0 0 88 88">
+            <circle class="ring-bg" cx="44" cy="44" r="36"/>
+            <circle class="ring-fill" id="ring-fill" cx="44" cy="44" r="36"
+              stroke-dasharray="226.2" stroke-dashoffset="226.2"/>
+          </svg>
+          <div class="ring-center">
+            <div class="ring-pct" id="ring-pct">0%</div>
+            <div class="ring-pct-lbl">達成</div>
+          </div>
+        </div>
+        <div class="prog-info">
+          <div class="prog-nums"><span id="prog-cur">0</span>h <span>/ </span><span id="prog-goal">10</span>h</div>
+          <div class="prog-remain" id="prog-remain">あと — h で目標達成！</div>
+          <button class="prog-goal-btn" onclick="openGoalModal()">目標を変更</button>
+        </div>
+      </div>
+      <div class="week-bars" id="week-bars"></div>
+    </div>
+
+    <div class="card streak-card">
+      <div class="card-title">連続勉強記録</div>
+      <div class="streak-top">
+        <div>
+          <div class="streak-num" id="streak-num">0</div>
+          <div class="streak-unit">日連続</div>
+        </div>
+        <div>
+          <div style="font-size:11px;color:var(--t2)">現在のレベル</div>
+          <div class="streak-level" id="streak-level">🌱 スタート</div>
+        </div>
+      </div>
+      <div class="streak-dots" id="streak-dots"></div>
+    </div>
+
+    <div class="card feed-card">
+      <div class="card-title">みんなの学習報告</div>
+      <div id="feed-list"><div style="text-align:center;color:var(--t2);padding:16px;font-size:13px">読み込み中...</div></div>
+    </div>
+
+    <div class="action-row">
+      <button class="btn-action" onclick="openReportModal()">
+        <span class="btn-action-icon">📝</span><span>学習報告する</span>
+      </button>
+      <button class="btn-action btn-consult" onclick="openConsultModal()">
+        <span class="btn-action-icon">💬</span><span>コーチに相談</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-report" onclick="closeModal('modal-report')">
+  <div class="modal-box" onclick="event.stopPropagation()">
+    <div class="modal-title">📝 学習報告</div>
+    <div class="modal-sub">今日の学習内容や目標を一言報告しましょう！</div>
+    <textarea id="report-input" class="modal-input" rows="3" placeholder="例）数学の微積分を3時間やります！"></textarea>
+    <div class="modal-btns">
+      <button class="btn-cancel" onclick="closeModal('modal-report')">キャンセル</button>
+      <button class="btn-submit" onclick="submitReport()">投稿する</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-consult" onclick="closeModal('modal-consult')">
+  <div class="modal-box" onclick="event.stopPropagation()">
+    <div class="modal-title">💬 コーチに相談</div>
+    <div class="modal-sub">勉強の悩みや質問をコーチに送ります。後ほど確認・返信します。</div>
+    <textarea id="consult-input" class="modal-input" rows="4" placeholder="例）英語の長文読解でいつも時間が足りません..."></textarea>
+    <div class="modal-btns">
+      <button class="btn-cancel" onclick="closeModal('modal-consult')">キャンセル</button>
+      <button class="btn-submit" onclick="submitConsult()">送信する</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-goal" onclick="closeModal('modal-goal')">
+  <div class="modal-box" onclick="event.stopPropagation()">
+    <div class="modal-title">🎯 週間目標を設定</div>
+    <div class="modal-sub">今週の学習目標時間を設定します</div>
+    <div class="range-val"><span id="goal-val">10</span><span class="range-unit"> 時間 / 週</span></div>
+    <div class="modal-range-wrap">
+      <input id="goal-range" class="modal-range" type="range" min="1" max="40" value="10"
+        oninput="document.getElementById('goal-val').textContent=this.value">
+    </div>
+    <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--t2);margin-top:2px"><span>1時間</span><span>40時間</span></div>
+    <div class="modal-btns" style="margin-top:20px">
+      <button class="btn-cancel" onclick="closeModal('modal-goal')">キャンセル</button>
+      <button class="btn-submit" onclick="submitGoal()">設定する</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+<div class="loading-overlay hidden" id="loading"><div class="spinner"></div></div>
+
+<script>
+// ════════════════════════════════════════════════
+//  STATE
+// ════════════════════════════════════════════════
+var U               = null;
+var SESSION         = null;
+var PREV_TODAY_MINS = 0;
+var TIMER_IV        = null;
+var POLL_IV         = null;
+var DASH_DATA       = null;
+var SELECTED_SUBJ   = '数学';
+
+// ════════════════════════════════════════════════
+//  API HELPER — GAS へのリクエストを /api/gas 経由で送る
+//  google.script.run の代替
+// ════════════════════════════════════════════════
+function gasCall(action, params, onSuccess, onError) {
+  var body = Object.assign({ action: action }, params || {});
+  fetch('/api/gas', {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify(body)
+  })
+  .then(function(r) {
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return r.json();
+  })
+  .then(function(data) { if (onSuccess) onSuccess(data); })
+  .catch(function(err) {
+    console.error('[gasCall/' + action + ']', err);
+    if (onError) onError(err);
+  });
+}
+
+// ════════════════════════════════════════════════
+//  INIT
+// ════════════════════════════════════════════════
+window.addEventListener('load', function() {
+  var sc   = localStorage.getItem('ara_code');
+  var name = localStorage.getItem('ara_name');
+  var goal = localStorage.getItem('ara_goal');
+  var sid  = localStorage.getItem('ara_sid');
+  var st   = localStorage.getItem('ara_stime');
+
+  if (sc && name) {
+    U = { studentCode: sc, name: name, weeklyGoalHours: Number(goal) || 10 };
+    if (sid && st) SESSION = { sessionId: sid, startTime: new Date(st) };
+    showDash();
+    loadDash();
+    startPoll();
+    if (SESSION) startTimerDisplay();
+  } else {
+    showLogin();
+    fetchLiveForLogin();
+  }
+});
+
+// ════════════════════════════════════════════════
+//  SCREEN
+// ════════════════════════════════════════════════
+function showLogin() {
+  document.getElementById('screen-login').classList.remove('hidden');
+  document.getElementById('screen-dash').classList.add('hidden');
+  stopTimer(); stopPoll();
+}
+function showDash() {
+  document.getElementById('screen-login').classList.add('hidden');
+  document.getElementById('screen-dash').classList.remove('hidden');
+  if (U) document.getElementById('hdr-name').textContent = U.name + ' さん';
+}
+
+// ════════════════════════════════════════════════
+//  LOGIN
+// ════════════════════════════════════════════════
+function login() {
+  var code = document.getElementById('code-input').value.trim().toUpperCase();
+  if (!code) { showErr('生徒コードを入力してください'); return; }
+  showLoading(true); clearErr();
+
+  gasCall('authenticate', { studentCode: code },
+    function(res) {
+      if (!res.success) { showLoading(false); showErr(res.message); return; }
+      U = { studentCode: res.studentCode, name: res.name, weeklyGoalHours: res.weeklyGoalHours };
+
+      gasCall('startStudy', { studentCode: res.studentCode },
+        function(sr) {
+          showLoading(false);
+          SESSION = { sessionId: sr.sessionId, startTime: new Date(sr.startTime) };
+          localStorage.setItem('ara_code',  U.studentCode);
+          localStorage.setItem('ara_name',  U.name);
+          localStorage.setItem('ara_goal',  U.weeklyGoalHours);
+          localStorage.setItem('ara_sid',   sr.sessionId);
+          localStorage.setItem('ara_stime', sr.startTime);
+          showDash(); loadDash(); startPoll(); startTimerDisplay();
+          showToast('入室しました 🎯');
+        },
+        function(e) { showLoading(false); showErr('接続エラーが発生しました。もう一度お試しください。'); }
+      );
+    },
+    function(e) { showLoading(false); showErr('接続エラーが発生しました。もう一度お試しください。'); }
+  );
+}
+
+document.getElementById('code-input').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') login();
+});
+
+// ════════════════════════════════════════════════
+//  LOGOUT
+// ════════════════════════════════════════════════
+function confirmLogout() {
+  if (!confirm('退出しますか？\n勉強時間が記録されます。')) return;
+  logout();
+}
+
+function logout() {
+  showLoading(true);
+
+  function clearAndGo() {
+    showLoading(false);
+    U = SESSION = DASH_DATA = null;
+    PREV_TODAY_MINS = 0;
+    localStorage.removeItem('ara_code');  localStorage.removeItem('ara_name');
+    localStorage.removeItem('ara_goal');  localStorage.removeItem('ara_sid');
+    localStorage.removeItem('ara_stime');
+    document.getElementById('code-input').value = '';
+    showLogin(); fetchLiveForLogin();
+    showToast('お疲れさまでした！記録しました ✅');
+  }
+
+  if (SESSION && U) {
+    gasCall('stopStudy',
+      { studentCode: U.studentCode, sessionId: SESSION.sessionId, startTime: SESSION.startTime.toISOString() },
+      clearAndGo, clearAndGo
+    );
+  } else {
+    clearAndGo();
+  }
+}
+
+// ════════════════════════════════════════════════
+//  SESSION TOGGLE
+// ════════════════════════════════════════════════
+function toggleSession() {
+  if (SESSION) {
+    if (!confirm('退室して勉強時間を記録しますか？')) return;
+    showLoading(true);
+    gasCall('stopStudy',
+      { studentCode: U.studentCode, sessionId: SESSION.sessionId, startTime: SESSION.startTime.toISOString() },
+      function(res) {
+        showLoading(false);
+        SESSION = null;
+        localStorage.removeItem('ara_sid'); localStorage.removeItem('ara_stime');
+        stopTimer(); updateTimerUI(false);
+        showToast('お疲れさまでした！ +' + (res.durationMins || 0) + '分 記録しました');
+        loadDash();
+      },
+      function() { showLoading(false); showToast('エラーが発生しました'); }
+    );
+  } else {
+    showLoading(true);
+    gasCall('startStudy', { studentCode: U.studentCode },
+      function(sr) {
+        showLoading(false);
+        SESSION = { sessionId: sr.sessionId, startTime: new Date(sr.startTime) };
+        localStorage.setItem('ara_sid',   sr.sessionId);
+        localStorage.setItem('ara_stime', sr.startTime);
+        startTimerDisplay(); updateTimerUI(true);
+        showToast('入室しました 📚');
+      },
+      function() { showLoading(false); }
+    );
+  }
+}
+
+// ════════════════════════════════════════════════
+//  TIMER
+// ════════════════════════════════════════════════
+function startTimerDisplay() { stopTimer(); updateTimerUI(true); TIMER_IV = setInterval(tickTimer, 1000); }
+function stopTimer() { if (TIMER_IV) { clearInterval(TIMER_IV); TIMER_IV = null; } }
+
+function tickTimer() {
+  if (!SESSION) return;
+  var elapsed = Math.floor((Date.now() - SESSION.startTime.getTime()) / 1000);
+  document.getElementById('timer-disp').textContent = fmtTime(elapsed);
+  renderTodayMins(PREV_TODAY_MINS + Math.floor(elapsed / 60));
+}
+
+function updateTimerUI(inSession) {
+  var btn   = document.getElementById('btn-main-action');
+  var disp  = document.getElementById('timer-disp');
+  var stat  = document.getElementById('entry-status');
+  var sub   = document.getElementById('timer-sub');
+  var slbl  = document.getElementById('entry-subj-lbl');
+  if (inSession) {
+    btn.className = 'btn-exit'; btn.textContent = '退室する';
+    disp.className = 'timer-display timer-active';
+    stat.classList.remove('hidden'); slbl.textContent = SELECTED_SUBJ + ' 勉強中';
+    sub.textContent = '集中して頑張ろう！退室ボタンで時間が記録されます';
+  } else {
+    btn.className = 'btn-enter'; btn.textContent = '入室する →';
+    disp.className = 'timer-display timer-idle'; disp.textContent = '00:00:00';
+    stat.classList.add('hidden'); sub.textContent = '科目を選んで入室しましょう';
+  }
+}
+
+function selSubj(el) {
+  document.querySelectorAll('.subj-chip').forEach(function(c){ c.classList.remove('active'); });
+  el.classList.add('active');
+  SELECTED_SUBJ = el.textContent;
+  document.getElementById('entry-subj-lbl').textContent = SELECTED_SUBJ + ' 勉強中';
+}
+
+// ════════════════════════════════════════════════
+//  DASHBOARD
+// ════════════════════════════════════════════════
+function loadDash() {
+  if (!U) return;
+  gasCall('getDashboard', { studentCode: U.studentCode },
+    function(data) { DASH_DATA = data; renderDash(data); },
+    function() {}
+  );
+  gasCall('getRecentReports', {}, renderFeed, function() {});
+}
+
+function renderDash(data) {
+  if (!data || data.error) return;
+  PREV_TODAY_MINS = 0;
+  if (data.weekDays) {
+    data.weekDays.forEach(function(d) { if (d.date === data.today) PREV_TODAY_MINS = d.minutes; });
+  }
+  if (!SESSION) renderTodayMins(PREV_TODAY_MINS);
+
+  var totalH = (data.totalMins / 60).toFixed(1);
+  document.getElementById('stat-total').innerHTML = totalH + '<span style="font-size:14px">h</span>';
+
+  var pct    = data.goalMins > 0 ? Math.min(100, Math.round(data.weeklyMins / data.goalMins * 100)) : 0;
+  var curH   = (data.weeklyMins / 60).toFixed(1);
+  var remH   = ((Math.max(0, data.goalMins - data.weeklyMins)) / 60).toFixed(1);
+
+  document.getElementById('ring-pct').textContent  = pct + '%';
+  document.getElementById('prog-cur').textContent  = curH;
+  document.getElementById('prog-goal').textContent = data.goalHours;
+  var remEl = document.getElementById('prog-remain');
+  if (pct >= 100) { remEl.textContent = '🎉 今週の目標達成！おめでとう！'; remEl.className = 'prog-remain done'; }
+  else            { remEl.textContent = 'あと ' + remH + 'h で目標達成！'; remEl.className = 'prog-remain'; }
+
+  var circ   = 2 * Math.PI * 36;
+  var offset = circ * (1 - pct / 100);
+  document.getElementById('ring-fill').setAttribute('stroke-dashoffset', offset.toFixed(1));
+  document.getElementById('ring-fill').setAttribute('stroke-dasharray',  circ.toFixed(1));
+
+  document.getElementById('goal-range').value          = data.goalHours;
+  document.getElementById('goal-val').textContent       = data.goalHours;
+
+  renderWeekBars(data.weekDays, data.today, data.goalMins);
+  renderStreak(data.streak, data.weekDays, data.today);
+}
+
+function renderTodayMins(mins) {
+  var h = Math.floor(mins / 60), m = mins % 60;
+  document.getElementById('stat-today').innerHTML = (h > 0 ? h + 'h ' + m + 'm' : m + '分');
+}
+
+function renderWeekBars(days, today, goalMins) {
+  if (!days || !days.length) return;
+  var maxMins = Math.max(goalMins / 7 * 1.5, 1);
+  days.forEach(function(d){ if (d.minutes > maxMins) maxMins = d.minutes; });
+  var html = '';
+  days.forEach(function(d) {
+    var isToday = d.date === today;
+    var pct     = Math.min(100, Math.round(d.minutes / maxMins * 100));
+    var cls     = d.minutes > 0 ? (isToday ? 'today-bar' : '') : 'empty-bar';
+    var lbl     = d.minutes >= 60 ? Math.floor(d.minutes/60)+'h'+(d.minutes%60>0?d.minutes%60+'m':'') : (d.minutes>0?d.minutes+'m':'');
+    html += '<div class="day-col">'
+          + '<div class="bar-wrap"><div class="bar '+ cls +'" style="height:'+ Math.max(pct,0) +'%"></div></div>'
+          + '<div class="day-lbl'+ (isToday?' today-lbl':'') +'">'+ d.label +'</div>'
+          + '<div class="day-mins">'+ lbl +'</div></div>';
+  });
+  document.getElementById('week-bars').innerHTML = html;
+}
+
+function renderStreak(streak, days, today) {
+  document.getElementById('streak-num').textContent = streak;
+  var levels = [[30,'🏆 逆転の申し子'],[14,'💪 本気モード'],[7,'🔥 熱量上昇中'],[3,'⚡ 加速中'],[0,'🌱 スタート']];
+  var lv = '🌱 スタート';
+  for (var i = 0; i < levels.length; i++) { if (streak >= levels[i][0]) { lv = levels[i][1]; break; } }
+  document.getElementById('streak-level').textContent = lv;
+  if (!days) return;
+  var html = '';
+  days.forEach(function(d) {
+    var cls = d.date === today ? 'today' : d.minutes > 0 ? 'done' : '';
+    html += '<div class="s-dot '+ cls +'">'+ d.label +'</div>';
+  });
+  document.getElementById('streak-dots').innerHTML = html;
+}
+
+function renderFeed(reports) {
+  var el = document.getElementById('feed-list');
+  if (!reports || reports.length === 0) {
+    el.innerHTML = '<div style="text-align:center;color:var(--t2);padding:16px;font-size:13px">まだ報告がありません。最初に投稿してみましょう！</div>';
+    return;
+  }
+  var html = '';
+  reports.forEach(function(r) {
+    var init = r.code ? r.code.slice(-2) : '??';
+    html += '<div class="feed-post"><div class="feed-av">'+ init +'</div>'
+          + '<div class="feed-body"><div class="feed-meta">'+ r.code +' · '+ r.time +'</div>'
+          + '<div class="feed-msg">'+ esc(r.message) +'</div></div></div>';
+  });
+  el.innerHTML = html;
+}
+
+// ════════════════════════════════════════════════
+//  POLLING
+// ════════════════════════════════════════════════
+function startPoll() {
+  stopPoll(); fetchLive();
+  POLL_IV = setInterval(fetchLive, 45000);
+}
+function stopPoll() { if (POLL_IV) { clearInterval(POLL_IV); POLL_IV = null; } }
+
+function fetchLive() {
+  gasCall('getLiveStats', {},
+    function(r) { document.getElementById('hdr-live-num').textContent = r.activeCount; },
+    function() {}
+  );
+}
+
+function fetchLiveForLogin() {
+  gasCall('getLiveStats', {},
+    function(r) { document.getElementById('login-live-num').textContent = r.activeCount; },
+    function()  { document.getElementById('login-live-num').textContent = '0'; }
+  );
+}
+
+// ════════════════════════════════════════════════
+//  MODALS
+// ════════════════════════════════════════════════
+function openReportModal()  { document.getElementById('modal-report').classList.add('open');  document.getElementById('report-input').focus(); }
+function openConsultModal() { document.getElementById('modal-consult').classList.add('open'); document.getElementById('consult-input').focus(); }
+function openGoalModal()    {
+  if (DASH_DATA) { document.getElementById('goal-range').value = DASH_DATA.goalHours; document.getElementById('goal-val').textContent = DASH_DATA.goalHours; }
+  document.getElementById('modal-goal').classList.add('open');
+}
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+
+function submitReport() {
+  var msg = document.getElementById('report-input').value.trim();
+  if (!msg) { showToast('内容を入力してください'); return; }
+  closeModal('modal-report');
+  gasCall('postReport', { studentCode: U.studentCode, message: msg },
+    function() {
+      document.getElementById('report-input').value = '';
+      showToast('学習報告を投稿しました 📝');
+      gasCall('getRecentReports', {}, renderFeed, function() {});
+    },
+    function() { showToast('エラーが発生しました'); }
+  );
+}
+
+function submitConsult() {
+  var msg = document.getElementById('consult-input').value.trim();
+  if (!msg) { showToast('内容を入力してください'); return; }
+  closeModal('modal-consult');
+  gasCall('postConsultation', { studentCode: U.studentCode, message: msg },
+    function() { document.getElementById('consult-input').value = ''; showToast('コーチに送信しました 💬 返信をお待ちください'); },
+    function() { showToast('エラーが発生しました'); }
+  );
+}
+
+function submitGoal() {
+  var h = Number(document.getElementById('goal-range').value);
+  if (!h || h < 1) return;
+  closeModal('modal-goal');
+  gasCall('setWeeklyGoal', { studentCode: U.studentCode, hours: h },
+    function() {
+      if (U) { U.weeklyGoalHours = h; localStorage.setItem('ara_goal', h); }
+      showToast('目標を ' + h + '時間/週 に設定しました 🎯');
+      loadDash();
+    },
+    function() { showToast('エラーが発生しました'); }
+  );
+}
+
+// ════════════════════════════════════════════════
+//  UTILITIES
+// ════════════════════════════════════════════════
+function fmtTime(s) { return pad(Math.floor(s/3600))+':'+pad(Math.floor((s%3600)/60))+':'+pad(s%60); }
+function pad(n)     { return String(n).padStart(2,'0'); }
+function esc(str)   { return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+var TOAST_TO = null;
+function showToast(msg) {
+  var el = document.getElementById('toast');
+  el.textContent = msg; el.classList.add('show');
+  if (TOAST_TO) clearTimeout(TOAST_TO);
+  TOAST_TO = setTimeout(function(){ el.classList.remove('show'); }, 3000);
+}
+function showLoading(show) { document.getElementById('loading').classList.toggle('hidden', !show); }
+function showErr(msg)  { var el = document.getElementById('login-err'); el.textContent = msg; el.style.display = 'block'; }
+function clearErr()    { document.getElementById('login-err').style.display = 'none'; }
+</script>
+</body>
+</html>
