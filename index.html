@@ -463,12 +463,18 @@ function gasCall(action,params,onSuccess,onError){
   <div class="msheet">
     <div style="text-align:center;font-size:30px;margin-bottom:8px">📝</div>
     <div class="mttl" style="text-align:center">今日の意気込みを投稿！</div>
-    <div style="font-size:12px;color:var(--t2);text-align:center;margin:6px 0 16px;line-height:1.6">タイムラインにひとこと投稿してから入室しよう。<br>みんなへの宣言が頑張る力になります 💪</div>
+    <div style="font-size:12px;color:var(--t2);text-align:center;margin:6px 0 12px;line-height:1.6">タイムラインにひとこと投稿してから入室しよう。<br>みんなへの宣言が頑張る力になります 💪</div>
+    <!-- スケジュール状況 -->
+    <div id="pre-entry-sched-status" style="margin-bottom:12px"></div>
     <div style="font-size:11px;font-weight:700;color:var(--t0);margin-bottom:6px">科目: <span style="color:var(--m)" id="pre-entry-subject">—</span></div>
     <textarea id="pre-entry-msg" class="mtxt" rows="4"
       placeholder="例）数学の微積分を今日こそマスターする！&#10;英単語200個達成を目指します！"></textarea>
     <button class="btn-cta" onclick="doEnterRoom(true)" style="margin-top:12px">投稿して入室する 🚀</button>
     <button class="back-btn" onclick="doEnterRoom(false)">投稿なしで入室する</button>
+    <button onclick="openScheduleModal()" style="width:100%;background:var(--lb);border:1px solid var(--l);border-radius:10px;padding:9px;font-size:13px;color:var(--m);font-weight:700;cursor:pointer;font-family:inherit;margin-top:6px">📅 スケジュールを確認・作成する</button>
+    <button class="back-btn" style="margin-top:4px" onclick="closeModal('modal-pre-entry')">← 科目を変更する</button>
+  </div>
+</div>投稿なしで入室する</button>
     <button class="back-btn" style="margin-top:4px" onclick="closeModal('modal-pre-entry')">← 科目を変更する</button>
   </div>
 </div>
@@ -717,6 +723,8 @@ function gasCall(action,params,onSuccess,onError){
         <button class="btn-cta" onclick="enterRoom()">入室する →</button>
       </div>
     </div>
+</div>
+<div class="pre-cal-section" style="max-width:1280px;margin:0 auto;padding:0 40px 0;">
   <div class="pre-cal-row">
     <div class="card" style="padding:16px 18px">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
@@ -744,7 +752,6 @@ function gasCall(action,params,onSuccess,onError){
     </div>
   </div>
   </div>
-</div>
 <!-- ACTIVE SESSION -->
 <div id="s-active" class="screen hidden">
   <div class="logo-bar">
@@ -1120,6 +1127,16 @@ function enterRoom(){
   var msgEl=document.getElementById('pre-entry-msg');
   if(msgEl)msgEl.value='';
   openModal('modal-pre-entry');
+  // スケジュール状況を確認して表示
+  var ssEl=document.getElementById('pre-entry-sched-status');
+  if(ssEl){
+    var hasSched=lsg('ara_sched_date')===todayDateStr();
+    if(hasSched){
+      ssEl.innerHTML='<div style="background:#E8F7EF;border:1px solid #6FCF97;border-radius:8px;padding:8px 12px;font-size:12px;color:#166534;margin-bottom:4px">✅ 今日のスケジュール作成済み</div>';
+    }else{
+      ssEl.innerHTML='<div style="background:#FEF3DC;border:1px solid #FAC88A;border-radius:8px;padding:8px 12px;font-size:12px;color:#7C3A00;margin-bottom:4px">⚠️ 今日のスケジュールがまだ作成されていません。<br>上の「スケジュールを確認・作成する」から作成できます。</div>';
+    }
+  }
 }
 function doEnterRoom(withPost){
   var intent=withPost?(document.getElementById('pre-entry-msg').value.trim()):'';
@@ -1713,7 +1730,7 @@ function expandReply(btn){
 // ══════════════════════════════════════════════════════════════
 //  機能2+3: デイリースケジュール
 // ══════════════════════════════════════════════════════════════
-var SLOT_H     = 48;   // 30分スロットの高さ(px)
+var SLOT_H     = 26;   // 15分スロットの高さ(px)
 var GRID_START = 6;    // グリッド開始（6:00）
 var GRID_END   = 24;   // グリッド終了（24:00）
 var SCH_COLORS = ['#207B97','#2E9E6B','#D45280','#C25A0A','#5B4DA7','#207B97','#B07A2A'];
@@ -1726,8 +1743,9 @@ function todayDateStr(){
   return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
 }
 function slotToHHMM(slot){
-  var h=GRID_START+Math.floor(slot/2),m=slot%2===0?'00':'30';
-  return String(h).padStart(2,'0')+':'+m;
+  var h=GRID_START+Math.floor(slot/4);
+  var m=(slot%4)*15;
+  return String(h).padStart(2,'0')+':'+String(m).padStart(2,'0');
 }
 function slotFromY(grid,y){
   var rect=grid.getBoundingClientRect();
@@ -1774,26 +1792,27 @@ function buildTimeGrid(){
   var grid=document.getElementById('time-grid');
   if(!grid)return;
   schedBlocks=[];schedColorIdx=0;
-  var totalSlots=(GRID_END-GRID_START)*2;
+  var totalSlots=(GRID_END-GRID_START)*4; // 15分刻み
   var now=new Date();
-  var currentSlot=(now.getHours()-GRID_START)*2+(now.getMinutes()>=30?1:0);
+  var currentSlot=(now.getHours()-GRID_START)*4+Math.floor(now.getMinutes()/15);
   var html='';
   for(var s=0;s<totalSlots;s++){
-    var isHour=s%2===0;
+    var isHour=s%4===0;
+    var isHalf=s%4===2; // 30分ライン
     var isPast=s<currentSlot;
-    var label=isHour?String(GRID_START+Math.floor(s/2)).padStart(2,'0')+':00':'';
+    var label=isHour?String(GRID_START+Math.floor(s/4)).padStart(2,'0')+':00':(isHalf?':30':'');
     html+='<div class="ts-row" data-slot="'+s+'" style="'+
       'height:'+SLOT_H+'px;display:flex;align-items:flex-start;'+
-      'border-top:'+(isHour?'1.5px solid var(--bd)':'1px dashed var(--bd)')+';'+
+      'border-top:'+(isHour?'1.5px solid var(--bd)':isHalf?'1px dashed var(--bd)':'0.5px dotted var(--bd)')+';'+
       'position:relative;cursor:crosshair;'+
       'background:'+(isPast?'rgba(0,0,0,0.02)':'transparent')+'">'+
       '<span style="font-size:10px;color:var(--t2);width:42px;flex-shrink:0;padding-top:2px;'+
-        'font-weight:'+(isHour?'700':'400')+'">'+label+'</span>'+
+        'font-weight:'+(isHour?'700':'400')+'" style="color:'+(isHalf?'var(--t2)':'var(--t2)')+'">'  +label+'</span>'+
       '<div style="flex:1;height:100%;position:relative"></div>'+
     '</div>';
   }
   // 現在時刻の線
-  var pct=(now.getMinutes()%30)/30;
+  var pct=(now.getMinutes()%15)/15;
   var currentPx=(currentSlot+pct)*SLOT_H;
   html+='<div style="position:absolute;top:'+currentPx+'px;left:42px;right:0;'+
     'height:2px;background:var(--rd);z-index:3;pointer-events:none">'+
