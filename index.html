@@ -458,6 +458,27 @@ function gasCall(action,params,onSuccess,onError){
     <button class="back-btn" style="color:var(--or);font-weight:700;font-size:13px" onclick="startTempPause()">☕ 一時休憩する</button>
   </div>
 </div>
+<!-- TASK INPUT MODAL (スケジュールブロック名入力) -->
+<div class="moverlay hidden" id="modal-task-inp" style="z-index:350">
+  <div class="msheet" style="max-width:380px">
+    <div style="font-size:12px;color:var(--m);font-weight:700;margin-bottom:6px" id="task-inp-ttl">時間帯</div>
+    <div class="mttl" style="font-size:16px;margin-bottom:12px">予定を追加</div>
+    <input id="task-inp-text" class="finp" type="text"
+           placeholder="例）数学 過去問、英語 長文読解" maxlength="25"
+           style="margin-bottom:12px"
+           onkeydown="if(event.key==='Enter')confirmTaskInput()">
+    <button class="btn-cta" onclick="confirmTaskInput()">追加する ✅</button>
+    <button class="back-btn" onclick="cancelTaskInput()">キャンセル</button>
+  </div>
+</div>
+<!-- SAVING DIALOG (保存中) -->
+<div class="moverlay hidden" id="modal-saving" style="z-index:400;background:rgba(0,0,0,0.5)">
+  <div style="background:#fff;border-radius:16px;padding:28px 40px;text-align:center;min-width:180px;box-shadow:0 8px 32px rgba(0,0,0,0.2)">
+    <div style="font-size:28px;margin-bottom:10px">💾</div>
+    <div style="font-size:14px;font-weight:700;color:var(--dk)">保存中...</div>
+    <div style="font-size:11px;color:var(--t2);margin-top:4px">スプレッドシートに書き込んでいます</div>
+  </div>
+</div>
 <!-- PRE-ENTRY MESSAGE MODAL (入室前の意気込み投稿) -->
 <div class="moverlay hidden" id="modal-pre-entry">
   <div class="msheet">
@@ -1753,9 +1774,12 @@ function slotToHHMM(slot){
   return String(h).padStart(2,'0')+':'+String(m).padStart(2,'0');
 }
 function slotFromY(grid,y){
+  // getBoundingClientRect はスクロール込みの viewport座標を返す
+  // y(clientY) - rect.top = grid内の相対位置（スクロール後も正確）
   var rect=grid.getBoundingClientRect();
-  var relY=y-rect.top+grid.scrollTop;
-  return Math.max(0,Math.min(Math.floor(relY/SLOT_H),(GRID_END-GRID_START)*2-1));
+  var relY=y-rect.top;
+  var maxSlot=(GRID_END-GRID_START)*4-1;
+  return Math.max(0,Math.min(Math.floor(relY/SLOT_H),maxSlot));
 }
 
 // ── モーダルを開く ──────────────────────────────────────────
@@ -1904,13 +1928,17 @@ function initDragCreate(grid){
     var e=Math.max(_schedStartSlot,_schedEndSlot);
     promptTaskInput(s,e);
   }
-  // PC: マウス操作（常時有効）
+  // PC: マウス操作（常時有効） ※ 重複登録防止のため一度削除してから追加
+  if(window._sMM)window.removeEventListener('mousemove',window._sMM);
+  if(window._sMU)window.removeEventListener('mouseup',window._sMU);
+  window._sMM=function(ev){moveDrag(ev.clientY);};
+  window._sMU=function(){if(_schedDragging)endDrag();};
   grid.addEventListener('mousedown',function(ev){
     if(ev.target.closest('.sched-block'))return;
     startDrag(ev.clientY);
   });
-  window.addEventListener('mousemove',moveDrag);
-  window.addEventListener('mouseup',function(){if(_schedDragging)endDrag();});
+  window.addEventListener('mousemove',window._sMM);
+  window.addEventListener('mouseup',window._sMU);
   // スマホ: 編集モード時のみドラッグ有効・それ以外はスクロール
   grid.addEventListener('touchstart',function(ev){
     if(!_schedEditMode)return; // 編集モード外はスクロール優先
@@ -1965,15 +1993,27 @@ function renderAllBlocks(){
 // ── 保存 ────────────────────────────────────────────────
 function saveScheduleData(){
   if(!U){closeModal('modal-schedule');return;}
+  if(schedBlocks.length===0){toast('予定が追加されていません');return;}
   var payload=schedBlocks.map(function(b){
     return{id:b.id,start:slotToHHMM(b.startSlot),end:slotToHHMM(b.endSlot+1),task:b.task,color:b.color};
   });
+  openModal('modal-saving'); // 保存中ダイアログを表示
   gasCall('saveSchedule',{studentCode:U.studentCode,date:todayDateStr(),schedule:JSON.stringify(payload)},
     function(res){
-      if(res&&res.success){localStorage.setItem('ara_sched_date',todayDateStr());updateSchedBtn();toast('スケジュールを保存しました ✅');closeModal('modal-schedule');}
-      else toast('保存エラーが発生しました');
+      closeModal('modal-saving');
+      if(res&&res.success){
+        localStorage.setItem('ara_sched_date',todayDateStr());
+        updateSchedBtn();
+        toast('スケジュールを保存しました ✅');
+        closeModal('modal-schedule');
+      }else{
+        toast('保存エラー: '+(res&&res.message?res.message:'サーバーエラー'));
+      }
     },
-    function(){toast('接続エラーが発生しました');}
+    function(){
+      closeModal('modal-saving');
+      toast('接続エラーが発生しました。再度お試しください');
+    }
   );
 }
 function clearSchedule(){
