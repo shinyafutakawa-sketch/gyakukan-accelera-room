@@ -1777,37 +1777,42 @@ function updateSchedBtn(){
 }
 
 function openScheduleModal(){
+  // 日付表示
   var dateEl=document.getElementById('sched-date');
   if(dateEl){
     var now=new Date();
     dateEl.textContent=(now.getMonth()+1)+'月'+now.getDate()+'日（'+
       ['日','月','火','水','木','金','土'][now.getDay()]+'）';
   }
-  buildTimeGrid();
   // バナーを非表示
-  var wb=document.getElementById("sched-warn-banner");if(wb)wb.classList.add("hidden");
-  // ※ ara_sched_date は saveScheduleData() 内でのみ保存する（開くだけでは保存しない）
-  // 既存スケジュールを読み込む
+  var wb=document.getElementById('sched-warn-banner');if(wb)wb.classList.add('hidden');
+  // グリッド構築（毎回リセット）
+  buildTimeGrid();
+  // 既存スケジュールを読み込む（15分スロット換算）
   if(U){
     gasCall('getSchedule',{studentCode:U.studentCode,date:todayDateStr()},function(res){
       if(res&&res.success&&res.schedule&&res.schedule!=='[]'){
         try{
           var saved=JSON.parse(res.schedule);
           schedBlocks=saved.map(function(b,i){
-            var startParts=b.start.split(':');
-            var endParts=b.end.split(':');
-            var ss2=(Number(startParts[0])-GRID_START)*2+(startParts[1]==='30'?1:0);
-            var es2=(Number(endParts[0])-GRID_START)*2+(endParts[1]==='30'?1:0)-1;
-            return{id:b.id||'b'+i,startSlot:ss2,endSlot:Math.max(ss2,es2),task:b.task,color:b.color||SCH_COLORS[i%SCH_COLORS.length]};
+            var sp=b.start.split(':'), ep=b.end.split(':');
+            // 15分スロット換算: 1時間=4スロット
+            var ss=(Number(sp[0])-GRID_START)*4+Math.round(Number(sp[1])/15);
+            var es=(Number(ep[0])-GRID_START)*4+Math.round(Number(ep[1])/15)-1;
+            return{id:b.id||'b'+i,startSlot:Math.max(0,ss),endSlot:Math.max(0,es),
+                   task:b.task,color:b.color||SCH_COLORS[i%SCH_COLORS.length]};
           });
           renderAllBlocks();
-        }catch(e){}
+        }catch(e){ console.error('Schedule load error:',e); }
       }
     },null);
   }
+  // モーダルを開く（※ ara_sched_date はここでは保存しない）
   openModal('modal-schedule');
-  // 初回ログイン時のスケジュール作成を促した記録
-  localStorage.setItem('ara_sched_date',todayDateStr());
+  // 編集モードをリセット
+  _schedEditMode=false;
+  var eb=document.getElementById('sched-edit-btn');
+  if(eb){eb.textContent='✏️ ブロックを追加する';eb.style.background='var(--m)';}
 }
 
 // ── タイムグリッド構築 ─────────────────────────────────────
@@ -1830,7 +1835,7 @@ function buildTimeGrid(){
       'position:relative;cursor:crosshair;'+
       'background:'+(isPast?'rgba(0,0,0,0.02)':'transparent')+'">'+
       '<span style="font-size:10px;color:var(--t2);width:42px;flex-shrink:0;padding-top:2px;'+
-        'font-weight:'+(isHour?'700':'400')+'" style="color:'+(isHalf?'var(--t2)':'var(--t2)')+'">'  +label+'</span>'+
+        'font-weight:'+(isHour?'700':'400')+'">'+label+'</span>'+
       '<div style="flex:1;height:100%;position:relative"></div>'+
     '</div>';
   }
