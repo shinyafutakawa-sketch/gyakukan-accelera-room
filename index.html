@@ -213,7 +213,6 @@ input,textarea{font-family:inherit;outline:none;border:none}
 .cal-l2{background:#33A6C4}
 .cal-l3{background:#207B97}
 .cal-l4{background:#104854}
-.pre-cal-row{grid-column:1/-1}
 .coach-in{background:#E8F7EF;border-radius:10px;padding:12px 14px;border-left:4px solid #22C55E;margin-bottom:10px}
 .coach-out{background:var(--bg2);border-radius:10px;padding:12px 14px;border-left:4px solid var(--bd);margin-bottom:10px}
 .coach-warn{background:#FEF3DC;border-radius:10px;padding:12px 14px;border-left:4px solid #FAC88A;margin-bottom:10px}
@@ -256,6 +255,7 @@ input,textarea{font-family:inherit;outline:none;border:none}
 .manual-overlay{padding:20px}
 .manual-sheet{max-width:680px;border-radius:18px}
 .subj-sheet{border-radius:20px;max-height:85vh}
+.pre-cal-row{grid-column:1/-1;min-width:0}
 }
 </style>
 </head>
@@ -703,6 +703,15 @@ function gasCall(action,params,onSuccess,onError){
         <div id="selected-subj-badge" class="hidden" style="margin-bottom:8px">
           <span style="background:var(--lb);border:1px solid var(--l);color:var(--m);border-radius:20px;padding:4px 12px;font-size:12px;font-weight:700" id="sel-subj-lbl"></span>
           <button onclick="resetOtherSubject()" style="background:none;border:none;color:var(--t2);font-size:11px;cursor:pointer;font-family:inherit">✕ 解除</button>
+        </div>
+        <!-- スケジュール未作成バナー -->
+        <div id="sched-warn-banner" class="hidden" style="background:#FEF3DC;border:1.5px solid #FAC88A;border-radius:10px;padding:10px 14px;margin-bottom:10px;font-size:12px;color:#7C3A00">
+          <div style="font-weight:700;margin-bottom:4px">📅 今日のスケジュールが未作成です</div>
+          <div>スケジュールを作成しますか？</div>
+          <div style="display:flex;gap:8px;margin-top:8px">
+            <button onclick="openScheduleModal()" style="background:var(--m);color:#fff;border:none;border-radius:8px;padding:5px 14px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">作成する →</button>
+            <button onclick="dismissSchedWarn()" style="background:none;border:1px solid #FAC88A;border-radius:8px;padding:5px 12px;font-size:11px;cursor:pointer;font-family:inherit;color:#7C3A00">後で</button>
+          </div>
         </div>
         <!-- 意気込み入力は入室ボタン押下後のモーダルで行う -->
         <button class="btn-cta" onclick="enterRoom()">入室する →</button>
@@ -1735,6 +1744,8 @@ function openScheduleModal(){
       ['日','月','火','水','木','金','土'][now.getDay()]+'）';
   }
   buildTimeGrid();
+  // バナーを非表示
+  var wb=document.getElementById("sched-warn-banner");if(wb)wb.classList.add("hidden");
   // 既存スケジュールを読み込む
   if(U){
     gasCall('getSchedule',{studentCode:U.studentCode,date:todayDateStr()},function(res){
@@ -1906,15 +1917,20 @@ function clearSchedule(){
 
 // ── 初回ログイン時にスケジュール作成を促す ──────────────
 function checkFirstLoginToday(){
-  var last=localStorage.getItem('ara_sched_date');
-  if(last!==todayDateStr()){
-    // 今日初めてのログイン → 3秒後にスケジュール作成を提案
-    setTimeout(function(){
-      if(document.getElementById('s-pre')&&!document.getElementById('s-pre').classList.contains('hidden')){
-        toast('📅 今日のスケジュールを作成しましょう！（ダッシュボードのボタンから）');
-      }
-    },3000);
-  }
+  var dismissed=localStorage.getItem('ara_sched_dismiss');
+  var today=todayDateStr();
+  // 今日スケジュール済みまたは今日バナーを閉じた場合はスキップ
+  if(lsg('ara_sched_date')===today||dismissed===today)return;
+  // スケジュールが未作成 → バナーを表示
+  setTimeout(function(){
+    var banner=document.getElementById('sched-warn-banner');
+    if(banner)banner.classList.remove('hidden');
+  },800);
+}
+function dismissSchedWarn(){
+  var banner=document.getElementById('sched-warn-banner');
+  if(banner)banner.classList.add('hidden');
+  localStorage.setItem('ara_sched_dismiss',todayDateStr());
 }
 
 function renderQAItem(item,autoReply){
