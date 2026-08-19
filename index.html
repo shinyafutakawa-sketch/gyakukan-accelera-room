@@ -476,7 +476,7 @@ function gasCall(action,params,onSuccess,onError){
 </div>
 <!-- SCHEDULE MODAL (機能2+3: スケジュール作成) -->
 <div class="moverlay hidden" id="modal-schedule" style="z-index:250;align-items:flex-start">
-  <div style="background:var(--bg);width:100%;max-width:480px;height:100vh;overflow-y:auto;display:flex;flex-direction:column;margin:0 auto;position:relative">
+  <div style="background:var(--bg);width:100%;max-width:480px;max-height:100vh;height:100%;overflow-y:auto;-webkit-overflow-scrolling:touch;display:flex;flex-direction:column;margin:0 auto;position:relative">
     <!-- ヘッダー -->
     <div style="position:sticky;top:0;background:var(--bg);z-index:10;padding:14px 16px 10px;border-bottom:1px solid var(--bd);display:flex;align-items:center;justify-content:space-between">
       <div>
@@ -510,6 +510,14 @@ function gasCall(action,params,onSuccess,onError){
     </details>
     <!-- タイムグリッド -->
     <div style="padding:0 16px 10px;flex:1">
+      <!-- 編集モードトグル -->
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+        <button id="sched-edit-btn" onclick="toggleSchedEditMode()"
+          style="background:var(--m);color:#fff;border:none;border-radius:20px;padding:5px 14px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">
+          ✏️ ブロックを追加する
+        </button>
+        <span style="font-size:11px;color:var(--t2)">← タップして追加モードに</span>
+      </div>
       <div id="time-grid" style="position:relative;user-select:none;-webkit-user-select:none"></div>
     </div>
     <!-- 保存ボタン -->
@@ -673,7 +681,7 @@ function gasCall(action,params,onSuccess,onError){
   <div class="pre-body">
     <div class="pre-col">
       <div class="card welcome-card" style="padding:13px 14px"><div style="font-size:11px;color:var(--t2)">おかえりなさい！</div><div id="wc-name" style="font-size:18px;font-weight:800;color:var(--dk);margin:2px 0">—</div><div style="display:flex;align-items:center;gap:6px;margin-bottom:2px"><span style="font-size:12px;color:var(--m);font-weight:700">👤 <span id="wc-nick">—</span></span><button onclick="openNickEdit()" style="background:none;border:none;font-size:10px;color:var(--t2);cursor:pointer;text-decoration:underline;font-family:inherit;padding:0">変更</button></div><div style="font-size:12px;color:var(--t1)">今日も逆転に向けて頑張りましょう 🔥</div>
-        <div style="margin-top:8px"><button onclick="openScheduleModal()" style="background:var(--lb);border:1px solid var(--l);border-radius:20px;padding:5px 14px;font-size:12px;color:var(--m);font-weight:700;cursor:pointer;font-family:inherit">📅 今日のスケジュールを作成する</button></div>
+        <div style="margin-top:8px"><button id="sched-btn" onclick="openScheduleModal()" style="background:var(--rd);color:#fff;border:none;border-radius:20px;padding:5px 14px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">📅 今日のスケジュールを作成する</button></div>
       </div>
       <div class="card prog-card">
         <div class="ct">今週の学習進捗</div>
@@ -1316,6 +1324,7 @@ function loadPre(){
   gasCall('getLiveStats',{},function(r){document.getElementById('p-live').textContent=r.activeCount},null);
   loadActivityCalendar();
   checkFirstLoginToday(); // 初回ログイン時スケジュール促進
+  updateSchedBtn(); // スケジュールボタン表示を更新
 }
 function submitGoal(){
   var h=Math.max(1,parseInt(document.getElementById('goal-range').value)||10);closeModal('modal-goal');
@@ -1726,7 +1735,7 @@ function expandReply(btn){
 // ══════════════════════════════════════════════════════════════
 //  機能2+3: デイリースケジュール
 // ══════════════════════════════════════════════════════════════
-var SLOT_H     = 26;   // 15分スロットの高さ(px)
+var SLOT_H     = 18;   // 15分スロットの高さ(px)
 var GRID_START = 6;    // グリッド開始（6:00）
 var GRID_END   = 24;   // グリッド終了（24:00）
 var SCH_COLORS = ['#207B97','#2E9E6B','#D45280','#C25A0A','#5B4DA7','#207B97','#B07A2A'];
@@ -1750,6 +1759,23 @@ function slotFromY(grid,y){
 }
 
 // ── モーダルを開く ──────────────────────────────────────────
+
+// ── スケジュールボタン表示更新 ────────────────────────────────
+function updateSchedBtn(){
+  var btn=document.getElementById('sched-btn');
+  if(!btn)return;
+  var hasSched=lsg('ara_sched_date')===todayDateStr();
+  if(hasSched){
+    btn.style.background='var(--lb)';btn.style.color='var(--m)';
+    btn.style.border='1px solid var(--l)';
+    btn.textContent='📅 今日のスケジュールを確認する';
+  }else{
+    btn.style.background='var(--rd)';btn.style.color='#fff';
+    btn.style.border='none';
+    btn.textContent='📅 今日のスケジュールを作成する';
+  }
+}
+
 function openScheduleModal(){
   var dateEl=document.getElementById('sched-date');
   if(dateEl){
@@ -1760,6 +1786,7 @@ function openScheduleModal(){
   buildTimeGrid();
   // バナーを非表示
   var wb=document.getElementById("sched-warn-banner");if(wb)wb.classList.add("hidden");
+  // ※ ara_sched_date は saveScheduleData() 内でのみ保存する（開くだけでは保存しない）
   // 既存スケジュールを読み込む
   if(U){
     gasCall('getSchedule',{studentCode:U.studentCode,date:todayDateStr()},function(res){
@@ -1827,7 +1854,22 @@ function buildTimeGrid(){
   initDragCreate(grid);
 }
 
-// ── ドラッグ操作（マウス＋タッチ両対応） ──────────────────
+// ── 編集モードトグル ────────────────────────────────────────
+var _schedEditMode=false;
+function toggleSchedEditMode(){
+  _schedEditMode=!_schedEditMode;
+  var btn=document.getElementById('sched-edit-btn');
+  var lbl=btn?btn.nextElementSibling:null;
+  if(btn){
+    btn.textContent=_schedEditMode?'✅ 追加モード中（タップで終了）':'✏️ ブロックを追加する';
+    btn.style.background=_schedEditMode?'#22C55E':'var(--m)';
+  }
+  if(lbl)lbl.textContent=_schedEditMode?'時間軸をドラッグして予定を追加':'← タップして追加モードに';
+  var grid=document.getElementById('time-grid');
+  if(grid)grid.style.cursor=_schedEditMode?'crosshair':'default';
+}
+
+// ── ドラッグ操作（モバイルは編集モード時のみ、PC は常時） ───
 function initDragCreate(grid){
   function startDrag(y){
     if(_schedDragging)return;
@@ -1836,9 +1878,9 @@ function initDragCreate(grid){
     _schedEndSlot=_schedStartSlot;
     _schedPreview=document.createElement('div');
     _schedPreview.style.cssText=
-      'position:absolute;left:42px;right:0;border-radius:8px;opacity:0.45;z-index:5;pointer-events:none;'+
+      'position:absolute;left:42px;right:0;border-radius:6px;opacity:0.5;z-index:5;pointer-events:none;'+
       'background:'+SCH_COLORS[schedColorIdx%SCH_COLORS.length]+';'+
-      'top:'+(_schedStartSlot*SLOT_H)+'px;height:'+SLOT_H+'px;transition:height 0.05s';
+      'top:'+(_schedStartSlot*SLOT_H)+'px;height:'+SLOT_H+'px;transition:height 0.03s';
     grid.appendChild(_schedPreview);
   }
   function moveDrag(y){
@@ -1857,18 +1899,24 @@ function initDragCreate(grid){
     var e=Math.max(_schedStartSlot,_schedEndSlot);
     promptTaskInput(s,e);
   }
+  // PC: マウス操作（常時有効）
   grid.addEventListener('mousedown',function(ev){
     if(ev.target.closest('.sched-block'))return;
     startDrag(ev.clientY);
   });
   window.addEventListener('mousemove',moveDrag);
   window.addEventListener('mouseup',function(){if(_schedDragging)endDrag();});
+  // スマホ: 編集モード時のみドラッグ有効・それ以外はスクロール
   grid.addEventListener('touchstart',function(ev){
+    if(!_schedEditMode)return; // 編集モード外はスクロール優先
     if(ev.target.closest('.sched-block'))return;
-    ev.preventDefault();startDrag(ev.touches[0].clientY);
+    ev.preventDefault();
+    startDrag(ev.touches[0].clientY);
   },{passive:false});
   grid.addEventListener('touchmove',function(ev){
-    ev.preventDefault();moveDrag(ev.touches[0].clientY);
+    if(!_schedDragging)return;
+    ev.preventDefault();
+    moveDrag(ev.touches[0].clientY);
   },{passive:false});
   grid.addEventListener('touchend',function(){if(_schedDragging)endDrag();});
 }
@@ -1917,7 +1965,7 @@ function saveScheduleData(){
   });
   gasCall('saveSchedule',{studentCode:U.studentCode,date:todayDateStr(),schedule:JSON.stringify(payload)},
     function(res){
-      if(res&&res.success){toast('スケジュールを保存しました ✅');closeModal('modal-schedule');}
+      if(res&&res.success){localStorage.setItem('ara_sched_date',todayDateStr());updateSchedBtn();toast('スケジュールを保存しました ✅');closeModal('modal-schedule');}
       else toast('保存エラーが発生しました');
     },
     function(){toast('接続エラーが発生しました');}
@@ -2138,6 +2186,7 @@ function selCalRange(btn,days){
   calRange=days;
   loadActivityCalendar();
   checkFirstLoginToday(); // 初回ログイン時スケジュール促進
+  updateSchedBtn(); // スケジュールボタン表示を更新
 }
 function loadActivityCalendar(){
   if(!U)return;
