@@ -464,7 +464,6 @@ function gasCall(action,params,onSuccess,onError){
     <div style="text-align:center;font-size:30px;margin-bottom:8px">📝</div>
     <div class="mttl" style="text-align:center">今日の意気込みを投稿！</div>
     <div style="font-size:12px;color:var(--t2);text-align:center;margin:6px 0 12px;line-height:1.6">タイムラインにひとこと投稿してから入室しよう。<br>みんなへの宣言が頑張る力になります 💪</div>
-    <!-- スケジュール状況 -->
     <div id="pre-entry-sched-status" style="margin-bottom:12px"></div>
     <div style="font-size:11px;font-weight:700;color:var(--t0);margin-bottom:6px">科目: <span style="color:var(--m)" id="pre-entry-subject">—</span></div>
     <textarea id="pre-entry-msg" class="mtxt" rows="4"
@@ -472,9 +471,6 @@ function gasCall(action,params,onSuccess,onError){
     <button class="btn-cta" onclick="doEnterRoom(true)" style="margin-top:12px">投稿して入室する 🚀</button>
     <button class="back-btn" onclick="doEnterRoom(false)">投稿なしで入室する</button>
     <button onclick="openScheduleModal()" style="width:100%;background:var(--lb);border:1px solid var(--l);border-radius:10px;padding:9px;font-size:13px;color:var(--m);font-weight:700;cursor:pointer;font-family:inherit;margin-top:6px">📅 スケジュールを確認・作成する</button>
-    <button class="back-btn" style="margin-top:4px" onclick="closeModal('modal-pre-entry')">← 科目を変更する</button>
-  </div>
-</div>投稿なしで入室する</button>
     <button class="back-btn" style="margin-top:4px" onclick="closeModal('modal-pre-entry')">← 科目を変更する</button>
   </div>
 </div>
