@@ -1820,16 +1820,15 @@ function openScheduleModal(){
           var saved=JSON.parse(res.schedule);
           schedBlocks=saved.map(function(b,i){
             var sp=b.start.split(':'), ep=b.end.split(':');
-            // 15分スロット換算: 1時間=4スロット
             var ss=(Number(sp[0])-GRID_START)*4+Math.round(Number(sp[1])/15);
             var es=(Number(ep[0])-GRID_START)*4+Math.round(Number(ep[1])/15)-1;
             return{id:b.id||'b'+i,startSlot:Math.max(0,ss),endSlot:Math.max(0,es),
                    task:b.task,color:b.color||SCH_COLORS[i%SCH_COLORS.length]};
           });
           renderAllBlocks();
-        }catch(e){ console.error('Schedule load error:',e); }
+        }catch(e){ console.error('Schedule load error:',e);toast('読み込みエラー: '+e.message); }
       }
-    },null);
+    },function(e){ console.error('getSchedule failed:',e); });
   }
   // モーダルを開く（※ ara_sched_date はここでは保存しない）
   openModal('modal-schedule');
