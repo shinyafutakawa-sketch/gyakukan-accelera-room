@@ -481,19 +481,30 @@ function gasCall(action,params,onSuccess,onError){
     <button class="back-btn" onclick="closeModal('modal-block-edit')">キャンセル</button>
   </div>
 </div>
-<!-- TASK INPUT MODAL (スケジュールブロック名入力) -->
+<!-- TASK INPUT MODAL (スケジュールブロック名入力・時間調整付き) -->
 <div class="moverlay hidden" id="modal-task-inp" style="z-index:350">
   <div class="msheet" style="max-width:380px">
-    <div style="font-size:12px;color:var(--m);font-weight:700;margin-bottom:6px" id="task-inp-ttl">時間帯</div>
-    <div class="mttl" style="font-size:16px;margin-bottom:12px">予定を追加</div>
+    <div class="mttl" style="font-size:15px;margin-bottom:4px">📌 予定を追加</div>
+    <div style="font-size:11px;color:var(--m);font-weight:700;margin-bottom:12px" id="task-inp-ttl">時間帯</div>
+    <div style="display:flex;gap:10px;margin-bottom:12px">
+      <div style="flex:1">
+        <div style="font-size:11px;font-weight:700;color:var(--t0);margin-bottom:4px">開始</div>
+        <select id="task-inp-start" class="finp" style="padding:8px 6px;font-size:13px;width:100%"></select>
+      </div>
+      <div style="flex:1">
+        <div style="font-size:11px;font-weight:700;color:var(--t0);margin-bottom:4px">終了</div>
+        <select id="task-inp-end" class="finp" style="padding:8px 6px;font-size:13px;width:100%"></select>
+      </div>
+    </div>
     <input id="task-inp-text" class="finp" type="text"
            placeholder="例）数学 過去問、英語 長文読解" maxlength="25"
            style="margin-bottom:12px"
            onkeydown="if(event.key==='Enter')confirmTaskInput()">
     <button class="btn-cta" onclick="confirmTaskInput()">追加する ✅</button>
-    <button class="back-btn" onclick="cancelTaskInput()">キャンセル</button>
+    <button class="back-btn" style="margin-top:8px" onclick="cancelTaskInput()">キャンセル</button>
   </div>
 </div>
+
 <!-- SAVING DIALOG (保存中) -->
 <div class="moverlay hidden" id="modal-saving" style="z-index:400;background:rgba(0,0,0,0.5)">
   <div style="background:#fff;border-radius:16px;padding:28px 40px;text-align:center;min-width:180px;box-shadow:0 8px 32px rgba(0,0,0,0.2)">
@@ -1928,9 +1939,154 @@ function buildTimeGrid(){
 
 
 
-// ── ドラッグ作成 / タップ作成（Googleカレンダー風） ─────────────
+// ── ドラッグ作成 ─────────────────────────────────────────────
+// 編集モードON  → touchstart.preventDefault() でドラッグ確実動作
+// 編集モードOFF → スクロール優先 + タップでモーダル追加
+// ── スケジュール共通変数 ─────────────────────────────────────
+var SCH_COLORS=['#207B97','#2E9E6B','#D45280','#C25A0A','#5B4DA7','#207B97','#B07A2A'];
+
+// 時間セレクターのオプション生成（15分刻み）
+function _buildTimeOpts(selectedSlot){
+  var opts='';
+  var total=(GRID_END-GRID_START)*4+1;
+  for(var s=0;s<total;s++){
+    var h=GRID_START+Math.floor(s/4),m=(s%4)*15;
+    var t=String(h).padStart(2,'0')+':'+String(m).padStart(2,'0');
+    opts+='<option value="'+s+'"'+(s===selectedSlot?' selected':'')+'>'+t+'</option>';
+  }
+  return opts;
+}
+
+
+// ── ブロックのドラッグ移動（編集モードON時） ──────────────────
+function _initBlockDrag(div,block){
+  var _bDragging=false,_bSY=0,_bOrigStart=0,_bLpTimer=null;
+
+  function _bMoveDrag(y){
+    if(!_bDragging)return;
+    var grid=document.getElementById('time-grid');if(!grid)return;
+    var delta=Math.round((y-_bSY)/SLOT_H);
+    var newStart=Math.max(0,_bOrigStart+delta);
+    var span=block.endSlot-block.startSlot;
+    var maxSlot=(GRID_END-GRID_START)*4-1;
+    newStart=Math.min(newStart,maxSlot-span);
+    div.style.top=(newStart*SLOT_H+2)+'px';
+  }
+
+  function _bEndDrag(y){
+    if(!_bDragging)return;
+    _bDragging=false;
+    div.style.opacity='1';div.style.zIndex='4';
+    var grid=document.getElementById('time-grid');if(!grid)return;
+    var delta=Math.round((y-_bSY)/SLOT_H);
+    var newStart=Math.max(0,_bOrigStart+delta);
+    var span=block.endSlot-block.startSlot;
+    var maxSlot=(GRID_END-GRID_START)*4-1;
+    newStart=Math.min(newStart,maxSlot-span);
+    block.startSlot=newStart;
+    block.endSlot=newStart+span;
+    renderAllBlocks();
+  }
+
+  // PC: マウスドラッグ
+  div.addEventListener('mousedown',function(ev){
+    if(!_schedEditMode)return;
+    ev.stopPropagation();
+    _bDragging=true;_bSY=ev.clientY;_bOrigStart=block.startSlot;
+    div.style.opacity='0.7';div.style.zIndex='10';
+    function mm(e){_bMoveDrag(e.clientY);}
+    function mu(e){_bEndDrag(e.clientY);window.removeEventListener('mousemove',mm);window.removeEventListener('mouseup',mu);}
+    window.addEventListener('mousemove',mm);
+    window.addEventListener('mouseup',mu);
+  });
+
+  // スマホ: 長押し→ドラッグ移動
+  div.addEventListener('touchstart',function(ev){
+    if(!_schedEditMode)return;
+    ev.stopPropagation();
+    var ty=ev.touches[0].clientY;
+    _bLpTimer=setTimeout(function(){
+      _bDragging=true;_bSY=ty;_bOrigStart=block.startSlot;
+      div.style.opacity='0.7';div.style.zIndex='10';
+      if(navigator.vibrate)navigator.vibrate(30);
+    },350);
+  },{passive:true});
+  div.addEventListener('touchmove',function(ev){
+    if(!_bDragging){clearTimeout(_bLpTimer);return;}
+    ev.preventDefault();ev.stopPropagation();
+    _bMoveDrag(ev.touches[0].clientY);
+  },{passive:false});
+  div.addEventListener('touchend',function(ev){
+    clearTimeout(_bLpTimer);
+    if(_bDragging)_bEndDrag(ev.changedTouches[0].clientY);
+  });
+}
+
+
+// ── 全ブロックを描画 ─────────────────────────────────────────
+function renderAllBlocks(){
+  document.querySelectorAll('#time-grid .sched-block').forEach(function(el){el.remove();});
+  var grid=document.getElementById('time-grid');if(!grid)return;
+  schedBlocks.forEach(function(b){
+    var div=document.createElement('div');
+    div.className='sched-block';div.dataset.id=b.id;
+    div.style.cssText=
+      'position:absolute;left:46px;right:4px;z-index:4;cursor:pointer;'+
+      'top:'+(b.startSlot*SLOT_H+2)+'px;'+
+      'height:'+((b.endSlot-b.startSlot+1)*SLOT_H-4)+'px;'+
+      'background:'+b.color+';color:#fff;border-radius:8px;'+
+      'padding:3px 7px;overflow:hidden;box-shadow:0 2px 6px rgba(0,0,0,0.18)';
+    div.innerHTML=
+      '<div style="font-size:10px;opacity:0.85">'+slotToHHMM(b.startSlot)+'〜'+slotToHHMM(b.endSlot+1)+'</div>'+
+      '<div style="font-size:12px;font-weight:700;line-height:1.3">'+esc(b.task)+'</div>';
+    // 編集モードON時のみブロックを編集可能
+    div.addEventListener('click',function(ev){
+      if(!_schedEditMode)return; // 編集モードOFFなら無視
+      ev.stopPropagation();openBlockEdit(b.id);
+    });
+    div.addEventListener('touchend',function(ev){
+      if(!_schedEditMode)return;
+      ev.stopPropagation();ev.preventDefault();openBlockEdit(b.id);
+    },{passive:false});
+    // ブロックドラッグ移動（編集モードON時）
+    _initBlockDrag(div,b);
+    grid.appendChild(div);
+  });
+}
+
+
 function initDragCreate(grid){
-  // ── PC: クリック→モーダル、ドラッグ→枠作成 ─────────────────
+  // ── ドラッグ作成の内部関数 ────────────────────────────────────
+  function startDrag(y){
+    if(_schedDragging)return;
+    _schedDragging=true;
+    _schedStartSlot=slotFromY(grid,y);
+    _schedEndSlot=_schedStartSlot;
+    _schedPreview=document.createElement('div');
+    _schedPreview.style.cssText=
+      'position:absolute;left:42px;right:0;border-radius:6px;opacity:0.5;z-index:5;pointer-events:none;'+
+      'background:'+SCH_COLORS[schedColorIdx%SCH_COLORS.length]+';'+
+      'top:'+(_schedStartSlot*SLOT_H)+'px;height:'+SLOT_H+'px;transition:height 0.05s';
+    grid.appendChild(_schedPreview);
+  }
+  function moveDrag(y){
+    if(!_schedDragging||!_schedPreview)return;
+    _schedEndSlot=slotFromY(grid,y);
+    var top=Math.min(_schedStartSlot,_schedEndSlot)*SLOT_H;
+    var h=(Math.abs(_schedEndSlot-_schedStartSlot)+1)*SLOT_H;
+    _schedPreview.style.top=top+'px';
+    _schedPreview.style.height=h+'px';
+  }
+  function endDrag(){
+    if(!_schedDragging)return;
+    _schedDragging=false;
+    if(_schedPreview){grid.removeChild(_schedPreview);_schedPreview=null;}
+    var s=Math.min(_schedStartSlot,_schedEndSlot);
+    var e=Math.max(_schedStartSlot,_schedEndSlot);
+    promptTaskInput(s,e);
+  }
+
+  // ── PC: マウス操作 ─────────────────────────────────────────
   if(window._sMM)window.removeEventListener('mousemove',window._sMM);
   if(window._sMU)window.removeEventListener('mouseup',window._sMU);
   var _pc_dragged=false;
@@ -1948,112 +2104,88 @@ function initDragCreate(grid){
   window.addEventListener('mousemove',window._sMM);
   window.addEventListener('mouseup',window._sMU);
 
-  // ── スマホ: 長押し(400ms)→ドラッグ作成 / 短タップ→モーダル ──
-  var _lpTimer=null,_lpSY=0,_lpSX=0,_lpFired=false,_lpScrolled=false;
-
+  // ── スマホ: 編集モードON→touchstart.preventDefault+ドラッグ ─
+  var _tSY=0,_tSX=0,_tMoved=false;
   grid.addEventListener('touchstart',function(ev){
     if(ev.target.closest('.sched-block'))return;
-    _lpSY=ev.touches[0].clientY;_lpSX=ev.touches[0].clientX;
-    _lpFired=false;_lpScrolled=false;
-    _lpTimer=setTimeout(function(){
-      if(_lpScrolled)return;
-      _lpFired=true;
-      // バイブレーション（対応端末のみ）
-      if(navigator.vibrate)navigator.vibrate(40);
-      // 長押しインジケーター
-      var dot=document.createElement('div');
-      dot.style.cssText='position:absolute;left:46px;right:4px;'+
-        'top:'+((slotFromY(grid,_lpSY))*SLOT_H)+'px;height:'+SLOT_H+'px;'+
-        'background:var(--m);opacity:0.35;border-radius:6px;z-index:6;pointer-events:none';
-      dot.id='sched-lp-ind';grid.appendChild(dot);
-      startDrag(_lpSY);
-    },400);
-  },{passive:true});
-
-  grid.addEventListener('touchmove',function(ev){
-    var cy=ev.touches[0].clientY,cx=ev.touches[0].clientX;
-    if(!_lpFired){
-      // 長押し待機中に大きく動いたらスクロール確定
-      if(Math.abs(cy-_lpSY)>12||Math.abs(cx-_lpSX)>12){
-        _lpScrolled=true;clearTimeout(_lpTimer);_lpTimer=null;
-      }
-      return; // スクロールに任せる
+    _tSY=ev.touches[0].clientY;_tSX=ev.touches[0].clientX;_tMoved=false;
+    if(_schedEditMode){
+      ev.preventDefault();
+      startDrag(_tSY);
     }
-    // 長押し確定後 → ドラッグ作成
-    ev.preventDefault();moveDrag(cy);
   },{passive:false});
-
+  grid.addEventListener('touchmove',function(ev){
+    var dy=Math.abs(ev.touches[0].clientY-_tSY),dx=Math.abs(ev.touches[0].clientX-_tSX);
+    if(dy>8||dx>8)_tMoved=true;
+    if(_schedDragging){ev.preventDefault();moveDrag(ev.touches[0].clientY);}
+  },{passive:false});
   grid.addEventListener('touchend',function(){
-    clearTimeout(_lpTimer);_lpTimer=null;
-    var ind=document.getElementById('sched-lp-ind');if(ind)ind.remove();
     if(_schedDragging){endDrag();return;}
-    // 短タップ（スクロールなし・長押しなし）→ モーダルで追加
-    if(!_lpFired&&!_lpScrolled){
-      _openTapCreate(grid,_lpSY);
-    }
-    _lpFired=false;
+    if(!_tMoved&&!_schedEditMode){_openTapCreate(grid,_tSY);}
+    _tMoved=false;
   });
 }
 
-// タップ時に追加モーダルを開く（タスク名 + 時間調整）
+
+
+// タップ/クリックで追加モーダルを開く
 function _openTapCreate(grid,y){
   var slot=slotFromY(grid,y);
   var endSlot=Math.min(slot+3,(GRID_END-GRID_START)*4-1);
   _pendingS=slot;_pendingE=endSlot;
+  // 時間セレクター更新
+  var ss=document.getElementById('task-inp-start');
+  var es=document.getElementById('task-inp-end');
+  if(ss)ss.innerHTML=_buildTimeOpts(slot);
+  if(es)es.innerHTML=_buildTimeOpts(endSlot+1);
   var ttl=document.getElementById('task-inp-ttl');
-  if(ttl)ttl.textContent=slotToHHMM(slot)+'〜'+slotToHHMM(endSlot+1)+' に予定を追加';
+  if(ttl)ttl.textContent=slotToHHMM(slot)+'〜'+slotToHHMM(endSlot+1);
   var inp=document.getElementById('task-inp-text');if(inp)inp.value='';
   openModal('modal-task-inp');
   setTimeout(function(){var i=document.getElementById('task-inp-text');if(i)i.focus();},200);
 }
 
 
-
-// ── タスク名入力モーダル ──────────────────────────────────
+// ── タスク名入力（カスタムモーダル） ─────────────────────────
+var _pendingS=-1,_pendingE=-1;
 function promptTaskInput(s,e){
-  var taskName=prompt(slotToHHMM(s)+'〜'+slotToHHMM(e+1)+'\nタスク名を入力してください（例: 数学過去問）','');
-  if(taskName===null||taskName.trim()==='')return;
+  _pendingS=s;_pendingE=e;
+  var ttl=document.getElementById('task-inp-ttl');
+  if(ttl)ttl.textContent=slotToHHMM(s)+'〜'+slotToHHMM(e+1)+' に予定を追加';
+  var ss=document.getElementById('task-inp-start');
+  var es=document.getElementById('task-inp-end');
+  if(ss)ss.innerHTML=_buildTimeOpts(s);
+  if(es)es.innerHTML=_buildTimeOpts(e+1);
+  var inp=document.getElementById('task-inp-text');if(inp)inp.value='';
+  openModal('modal-task-inp');
+  setTimeout(function(){var i=document.getElementById('task-inp-text');if(i)i.focus();},200);
+}
+function confirmTaskInput(){
+  var inp=document.getElementById('task-inp-text');
+  var task=inp?inp.value.trim():'';
+  var ss=document.getElementById('task-inp-start');
+  var es=document.getElementById('task-inp-end');
+  var s=ss?parseInt(ss.value):_pendingS;
+  var e=es?Math.max(parseInt(es.value)-1,s):_pendingE;
+  closeModal('modal-task-inp');
+  if(!task)return;
   var color=SCH_COLORS[(schedColorIdx++)%SCH_COLORS.length];
-  schedBlocks.push({id:'b'+Date.now(),startSlot:s,endSlot:e,task:taskName.trim(),color:color});
+  schedBlocks.push({id:'b'+Date.now(),startSlot:s,endSlot:e,task:task,color:color});
+  _pendingS=-1;_pendingE=-1;
   renderAllBlocks();
 }
-
-// ── 全ブロック描画 ───────────────────────────────────────
-
-// ── スケジュール編集モード ────────────────────────────────────
-var _schedEditMode=false;
-function toggleSchedEditMode(){
-  _schedEditMode=!_schedEditMode;
-  var btn=document.getElementById('sched-edit-toggle');
-  if(btn){
-    btn.style.background=_schedEditMode?'var(--m)':'none';
-    btn.style.color=_schedEditMode?'#fff':'var(--t1)';
-    btn.textContent=_schedEditMode?'✅ 編集中':'🗒️ 編集';
-  }
-  var grid=document.getElementById('time-grid');
-  if(grid)grid.style.cursor=_schedEditMode?'crosshair':'pointer';
-  if(_schedEditMode)toast('ドラッグして予定の枠を作成できます');
+function cancelTaskInput(){
+  closeModal('modal-task-inp');
+  _pendingS=-1;_pendingE=-1;
 }
 
-// ── 時間セレクターのオプション生成 ────────────────────────────
-function _buildTimeOpts(selectedSlot){
-  var opts='';
-  for(var s=0;s<=(GRID_END-GRID_START)*4;s++){
-    var h=GRID_START+Math.floor(s/4),m=(s%4)*15;
-    var t=String(h).padStart(2,'0')+':'+String(m).padStart(2,'0');
-    opts+='<option value="'+s+'"'+(s===selectedSlot?' selected':'')+'>'+t+'</option>';
-  }
-  return opts;
-}
-
-// ── ブロックをタップして編集モーダルを開く ──────────────────
+// ── ブロック編集 ────────────────────────────────────────────
 var _editingBlockId='';
 function openBlockEdit(blockId){
   var block=schedBlocks.find(function(b){return b.id===blockId;});
   if(!block)return;
   _editingBlockId=blockId;
-  var ti=document.getElementById('block-edit-task');
-  if(ti)ti.value=block.task;
+  var ti=document.getElementById('block-edit-task');if(ti)ti.value=block.task;
   var ss=document.getElementById('block-edit-start');
   var es=document.getElementById('block-edit-end');
   if(ss)ss.innerHTML=_buildTimeOpts(block.startSlot);
@@ -2081,582 +2213,27 @@ function deleteBlockEdit(){
   renderAllBlocks();
 }
 
-// ── タップ(click)で追加モーダルを開く（編集モードOFF時） ────
-function _tapToCreate(grid,y){
-  var slot=slotFromY(grid,y);
-  var endSlot=Math.min(slot+3,(GRID_END-GRID_START)*4-1);
-  // タスク入力モーダルを使う
-  _pendingS=slot;_pendingE=endSlot;
-  var ttl=document.getElementById('task-inp-ttl');
-  if(ttl)ttl.textContent=slotToHHMM(slot)+'〜'+slotToHHMM(endSlot+1);
-  var si=document.getElementById('block-edit-start');
-  var ei=document.getElementById('block-edit-end');
-  if(si)si.innerHTML=_buildTimeOpts(slot);
-  if(ei)ei.innerHTML=_buildTimeOpts(endSlot+1);
-  // カスタムモーダルで時間調整可能な追加UIを開く
-  var inp=document.getElementById('task-inp-text');if(inp)inp.value='';
-  openModal('modal-task-inp');
-  setTimeout(function(){var i=document.getElementById('task-inp-text');if(i)i.focus();},200);
-}
+var _schedEditMode=false; // スケジュール編集モードフラグ
 
-function renderAllBlocks(){
-  document.querySelectorAll('#time-grid .sched-block').forEach(function(el){el.remove();});
-  var grid=document.getElementById('time-grid');if(!grid)return;
-  schedBlocks.forEach(function(b){
-    var div=document.createElement('div');
-    div.className='sched-block';div.dataset.id=b.id;
-    div.style.cssText=
-      'position:absolute;left:46px;right:4px;z-index:4;cursor:pointer;'+
-      'top:'+(b.startSlot*SLOT_H+2)+'px;'+
-      'height:'+((b.endSlot-b.startSlot+1)*SLOT_H-4)+'px;'+
-      'background:'+b.color+';color:#fff;border-radius:8px;'+
-      'padding:4px 8px;overflow:hidden;box-shadow:0 2px 6px rgba(0,0,0,0.18)';
-    div.innerHTML=
-      '<div style="font-size:10px;opacity:0.85">'+slotToHHMM(b.startSlot)+'〜'+slotToHHMM(b.endSlot+1)+'</div>'+
-      '<div style="font-size:12px;font-weight:700;line-height:1.3">'+esc(b.task)+'</div>';
-    div.addEventListener('click',function(ev){
-      ev.stopPropagation();
-      openBlockEdit(b.id); // タップで編集モーダルを開く
-    });
-    div.addEventListener('touchend',function(ev){
-      ev.stopPropagation();ev.preventDefault();
-      openBlockEdit(b.id);
-    },{passive:false});
-    grid.appendChild(div);
-  });
-}
-
-// ── 保存 ────────────────────────────────────────────────
-function saveScheduleData(){
-  if(!U){closeModal('modal-schedule');return;}
-  if(schedBlocks.length===0){toast('予定が追加されていません');return;}
-  var payload=schedBlocks.map(function(b){
-    return{id:b.id,start:slotToHHMM(b.startSlot),end:slotToHHMM(b.endSlot+1),task:b.task,color:b.color};
-  });
-  var saveDate=_schedCurrentDate?_dateToStr(_schedCurrentDate):todayDateStr();
-  var isToday=saveDate===todayDateStr();
-  openModal('modal-saving'); // 保存中ダイアログを表示
-  gasCall('saveSchedule',{studentCode:U.studentCode,date:saveDate,schedule:JSON.stringify(payload)},
-    function(res){
-      closeModal('modal-saving');
-      if(res&&res.success){
-        if(isToday){localStorage.setItem('ara_sched_date',todayDateStr());updateSchedBtn();}
-        toast('スケジュールを保存しました ✅');
-        closeModal('modal-schedule');
-      }else{
-        toast('保存エラー: '+(res&&res.message?res.message:'サーバーエラー'));
-      }
-    },
-    function(){
-      closeModal('modal-saving');
-      toast('接続エラーが発生しました。再度お試しください');
-    }
-  );
-}
-function clearSchedule(){
-  if(schedBlocks.length===0)return;
-  if(confirm('スケジュールをすべて削除しますか？')){
-    schedBlocks=[];schedColorIdx=0;renderAllBlocks();
+// ── 編集モードトグル ─────────────────────────────────────────
+function toggleSchedEditMode(){
+  _schedEditMode=!_schedEditMode;
+  var btn=document.getElementById('sched-edit-toggle');
+  if(btn){
+    btn.style.background=_schedEditMode?'#22C55E':'none';
+    btn.style.color=_schedEditMode?'#fff':'var(--t1)';
+    btn.style.border=_schedEditMode?'none':'1.5px solid var(--bd)';
+    btn.textContent=_schedEditMode?'✏️ 追加中':'🗒️ 編集';
   }
-}
-
-// ── 初回ログイン時にスケジュール作成を促す ──────────────
-function checkFirstLoginToday(){
-  var dismissed=localStorage.getItem('ara_sched_dismiss');
-  var today=todayDateStr();
-  // 今日スケジュール済みまたは今日バナーを閉じた場合はスキップ
-  if(lsg('ara_sched_date')===today||dismissed===today)return;
-  // スケジュールが未作成 → バナーを表示
-  setTimeout(function(){
-    var banner=document.getElementById('sched-warn-banner');
-    if(banner)banner.classList.remove('hidden');
-  },800);
-}
-function dismissSchedWarn(){
-  var banner=document.getElementById('sched-warn-banner');
-  if(banner)banner.classList.add('hidden');
-  localStorage.setItem('ara_sched_dismiss',todayDateStr());
-}
-
-function renderQAItem(item,autoReply){
-  var replySection;
-  if(item.reply){
-    var rFull=item.reply||'';
-    // 改行を<br>に変換、30文字以上は「返信を確認する」ボタンを表示
-    var rShort=rFull.length>30?esc(rFull.slice(0,30)).replace(/\n/g,'<br>')+'... ':esc(rFull).replace(/\n/g,'<br>');
-    var rBtn=rFull.length>30?'<button onclick="expandReply(this)" data-full="'+encodeURIComponent(rFull)+'" style="font-size:11px;color:var(--m);border:none;background:none;cursor:pointer;font-family:inherit;padding:2px 0;font-weight:700;display:block;margin-top:4px">返信を確認する →</button>':'';
-    replySection=
-      '<div class="qa-th-div"></div>'+
-      '<div style="display:flex;gap:8px;align-items:flex-start">'+
-        '<span style="font-size:16px;flex-shrink:0">👨‍🏫</span>'+
-        '<div style="flex:1">'+
-          '<div class="qa-th-meta">コーチからの返信</div>'+
-          '<div class="qa-th-reply">'+rShort+rBtn+'</div>'+
-        '</div>'+
-      '</div>';
-    } else if(autoReply){
-    replySection=
-      '<div class="qa-th-div"></div>'+
-      '<div style="background:#F0FAF6;border:1px solid #6FCF97;border-radius:8px;padding:8px 10px;font-size:12px;line-height:1.7">'+
-        '<strong>🤖 自動返信</strong><br>'+
-        '担当者が順次確認します。<br>'+
-        '回答までの目安時間は<strong>15分</strong>です。自習をして待ちましょう 💪'+
-      '</div>';
-  } else {
-    replySection=
-      '<div class="qa-th-div"></div>'+
-      '<div class="qa-th-wait">⏳ コーチの返信をお待ちください…</div>';
-  }
-  return '<div class="qa-thread">'+
-    '<div class="qa-th-meta">'+
-      '<span style="font-size:13px">💬</span>'+
-      '<span>あなた · '+item.time+'</span>'+
-      (item.reply
-        ?'<span style="background:var(--lb);color:var(--m);font-size:9px;font-weight:700;padding:1px 6px;border-radius:10px">✅ 返信あり</span>'
-        :'<span style="background:#FEF3DC;color:#C05A00;font-size:9px;font-weight:700;padding:1px 6px;border-radius:10px">⏳ 未返信</span>')+
-    '</div>'+
-    '<div class="qa-th-q">'+esc(item.message)+'</div>'+
-    replySection+
-    '</div>';
-}
-function loadQA(){
-  if(!U)return;
-  gasCall('getConsultations',{studentCode:U.studentCode},function(items){
-    var el=document.getElementById('qa-list');
-    if(!items||!items.length){
-      el.innerHTML='<div style="text-align:center;color:var(--t2);padding:16px;font-size:12px">まだ質問がありません<br>下の入力欄からコーチに質問できます</div>';
-      _qaLoadCnt++;
-      return;
-    }
-    // 新着返信の検知（2回目以降のポーリングで比較）
-    var curReplyCnt=items.filter(function(i){return !!i.reply;}).length;
-    _qaLoadCnt++;
-    if(_qaLoadCnt>1 && curReplyCnt>_prevReplyCnt){
-      var newN=curReplyCnt-_prevReplyCnt;
-      var badge=document.getElementById('qa-reply-badge');
-      var txt=document.getElementById('qa-badge-txt');
-      if(badge){badge.classList.remove('hidden');}
-      if(txt){txt.textContent='コーチから'+newN+'件の返信が届きました！';}
-      toast('📬 コーチから返信が届きました！');
-    }
-    _prevReplyCnt=curReplyCnt;
-    el.innerHTML=items.map(function(item){return renderQAItem(item,false);}).join('');
-    el.scrollTop=el.scrollHeight;
-  },null);
-}
-function scrollToQA(){
-  var badge=document.getElementById('qa-reply-badge');
-  if(badge)badge.classList.add('hidden');
-  var qaCard=document.querySelector('.card .chw');
-  if(qaCard)qaCard.scrollIntoView({behavior:'smooth',block:'center'});
-}
-function clearQABadge(){
-  var badge=document.getElementById('qa-reply-badge');
-  if(badge)badge.classList.add('hidden');
-}
-function postQA(){
-  var v=document.getElementById('qa-inp').value.trim();
-  if(!v||!U){if(!v)toast('質問内容を入力してください');return}
-  // すぐにUIに表示
-  var el=document.getElementById('qa-list');
-  var now=new Date();
-  var t=now.getHours()+':'+String(now.getMinutes()).padStart(2,'0');
-  if(el.innerHTML.includes('まだ質問がありません'))el.innerHTML='';
-  // スレッド形式で即時表示
-  var newThread=renderQAItem({time:t,message:v,reply:''},true);
-  if(el.querySelector('.qa-thread')){
-    el.insertAdjacentHTML('afterbegin',newThread);
-  } else {
-    el.innerHTML=newThread;
-  }
-  el.scrollTop=0;
-  document.getElementById('qa-inp').value='';
-  toast('質問を送信しました 💬');
-  gasCall('postConsultation',{studentCode:U.studentCode,message:v},null,function(){toast('送信エラーが発生しました')});
-}
-function startPoll(){if(pollIv)clearInterval(pollIv);fetchLive();pollIv=setInterval(fetchLive,45000)}
-function fetchLive(){gasCall('getLiveStats',{},function(r){liveCountCache=r.activeCount;['p-live','a-live','lr-live'].forEach(function(id){var el=document.getElementById(id);if(el)el.textContent=r.activeCount});var lu=document.getElementById('lr-today-u');if(lu)lu.textContent=r.todayUserCount+'人';var lh=document.getElementById('lr-today-h');if(lh)lh.textContent=Math.round(r.todayMins/60*10)/10+'h';if(r.ranking)renderRanking(r.ranking);if(r.participants)renderParticipants(r.participants);},null)}
-function fetchLiveLogin(){gasCall('getLiveStats',{},function(r){var e=document.getElementById('l-live');if(e)e.textContent=r.activeCount;var tu=document.getElementById('l-today-u');if(tu)tu.textContent=r.todayUserCount+'人';var th=document.getElementById('l-today-h');if(th)th.textContent=Math.round(r.todayMins/60*10)/10+'h';if(r.ranking)renderRanking(r.ranking);if(r.participants)renderParticipants(r.participants);},null)}
-function loadAdmin(){
-  // コーチチェックイン状態
-  gasCall('getCoachStatus',{},function(s){renderAdminCoachCard(s);},function(){renderAdminCoachCard(null);});
-  // 統計
-  gasCall('getLiveStats',{},function(r){
-    document.getElementById('adm-a').textContent=r.realActiveCount!==undefined?r.realActiveCount:r.activeCount;
-    document.getElementById('adm-t').textContent=(r.realTodayUserCount!==undefined?r.realTodayUserCount:r.todayUserCount)+'人';
-    document.getElementById('adm-h').textContent=Math.round((r.realTodayMins!==undefined?r.realTodayMins:r.todayMins)/60*10)/10+'h';
-
-  },null);
-  // 入室中生徒一覧
-  gasCall('getAdminStudents',{},function(students){
-    var el=document.getElementById('adm-students');
-    if(!el)return;
-    if(!students||!students.length){
-      el.innerHTML='<div style="padding:14px;text-align:center;color:var(--t2);font-size:12px">現在入室中の生徒はいません</div>';
-      return;
-    }
-    el.innerHTML=students.map(function(s){
-      var h=Math.floor(s.elapsedMins/60),m=s.elapsedMins%60;
-      var timeStr=h>0?h+'時間'+m+'分':m+'分';
-      return '<div class="adm-row">'+
-        '<div class="adm-av">'+esc(s.name).slice(0,2)+'</div>'+
-        '<div style="flex:1"><div class="adm-nm">'+esc(s.name)+'</div>'+
-        '<div class="adm-sj">'+esc(s.code)+'</div></div>'+
-        '<div class="adm-tm">'+timeStr+'</div>'+
-        '<span class="sbdg ss">在室</span></div>';
-    }).join('');
-  },null);
-  // Q&Aキュー
-  gasCall('getAdminConsultations',{},function(items){
-    var el=document.getElementById('adm-qa');
-    if(!el)return;
-    if(!items||!items.length){
-      el.innerHTML='<div style="padding:14px;text-align:center;color:var(--t2);font-size:12px">未対応の質問はありません ✅</div>';
-      return;
-    }
-    // 未対応と対応済に分類
-      var unread  = items.filter(function(q){return q.status==='未読';});
-      var replied = items.filter(function(q){return q.status!=='未読';});
-      function renderQAItem(q){
-        var hasReply=!!(q.reply&&q.reply.length>0);
-        var statusBadge=q.status==='未読'
-          ?'<span style="background:var(--rd);color:#fff;font-size:9px;font-weight:700;padding:2px 7px;border-radius:10px">未対応</span>'
-          :'<span style="background:#22C55E;color:#fff;font-size:9px;font-weight:700;padding:2px 7px;border-radius:10px">対応済</span>';
-        return '<div class="qa-row">'+
-          '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">'+
-            '<div><strong>'+esc(q.name)+'</strong>'+
-            ' <span style="color:var(--t2);font-size:10px">('+esc(q.code)+')</span> · '+q.time+'</div>'+
-            statusBadge+
-          '</div>'+
-          '<div style="margin:5px 0;padding:8px 10px;background:var(--lb);border-radius:8px;border-left:3px solid var(--m);">'+esc(q.message)+'</div>'+
-          (hasReply?'<div style="font-size:11px;color:var(--m);margin-bottom:6px;padding:6px 8px;background:#F0FAF6;border-radius:6px">📤 返信済: '+esc(q.reply)+'</div>':'')+
-          '<textarea id="ri-'+q.row+'"'+
-          ' style="display:block;width:100%;padding:8px 10px;border:1.5px solid var(--bd);border-radius:8px;font-size:12px;font-family:inherit;resize:vertical;min-height:56px;color:var(--t0);background:var(--bg);box-sizing:border-box;"'+
-          ' placeholder="返信内容を入力...">'+esc(q.reply||'')+'</textarea>'+
-          '<button onclick="submitReply('+q.row+',\''+q.code+'\',this)"'+
-          ' style="margin-top:6px;background:var(--m);color:#fff;border:none;border-radius:8px;padding:7px 16px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">'+
-          (hasReply?'更新':'送信')+
-          '</button>'+
-          '</div>';
-      }
-      var html2='';
-      if(unread.length>0){
-        html2+='<div style="background:#FEF2F2;border-radius:8px;padding:6px 10px;margin-bottom:8px;font-size:11px;font-weight:700;color:var(--rd)">⚠️ 未対応 '+unread.length+'件</div>';
-        html2+=unread.map(renderQAItem).join('');
-      }
-      if(replied.length>0){
-        html2+='<div style="background:#F0FAF6;border-radius:8px;padding:6px 10px;margin:10px 0 8px;font-size:11px;font-weight:700;color:#15803d">✅ 対応済 '+replied.length+'件</div>';
-        html2+=replied.map(renderQAItem).join('');
-      }
-      el.innerHTML=html2 || '<div style="padding:14px;text-align:center;color:var(--t2);font-size:12px">未対応の質問はありません ✅</div>'
-  },null);
-  // 30秒ごとに自動更新
-  if(!window._adminIv)window._adminIv=setInterval(function(){if(document.getElementById('modal-admin-reply')&&!document.getElementById('modal-admin-reply').classList.contains('hidden'))return;loadAdmin();},30000);
-}
-
-// ══════════════════════════════════════════════════════════════
-//  学習アクティビティカレンダー
-// ══════════════════════════════════════════════════════════════
-var calRange=90, _calTip=null;
-
-function toLocalDateStr(d){
-  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
-}
-function selCalRange(btn,days){
-  document.querySelectorAll('.rtab').forEach(function(b){b.classList.remove('on')});
-  btn.classList.add('on');
-  calRange=days;
-  loadActivityCalendar();
-  checkFirstLoginToday(); // 初回ログイン時スケジュール促進
-  updateSchedBtn(); // スケジュールボタン表示を更新
-}
-function loadActivityCalendar(){
-  if(!U)return;
-  var c=document.getElementById('cal-container');
-  if(!c)return;
-  c.innerHTML='<div style="text-align:center;padding:24px;font-size:12px;color:var(--t2)">読み込み中...</div>';
-  gasCall('getActivityCalendar',{studentCode:U.studentCode,days:calRange},function(data){
-    renderActivityCalendar(data||[]);
-  },function(){
-    c.innerHTML='<div style="text-align:center;padding:16px;font-size:12px;color:var(--t2)">データを取得できませんでした</div>';
-  });
-}
-function renderActivityCalendar(data){
-  var map={};
-  data.forEach(function(d){map[d.date]=d;});
-  var today=new Date();
-  var start=new Date(today);
-  start.setDate(start.getDate()-calRange+1);
-  // グリッド開始（日曜に合わせる）
-  var gs=new Date(start);
-  gs.setDate(gs.getDate()-gs.getDay());
-  var MONTHS=['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
-  var DAY_LBLS=['','月','','水','','金',''];
-  // 週ごとに配列化
-  var weeks=[],wk=[],d=new Date(gs);
-  while(d<=today){
-    wk.push(new Date(d));
-    if(wk.length===7){weeks.push(wk);wk=[];}
-    d.setDate(d.getDate()+1);
-  }
-  if(wk.length){while(wk.length<7)wk.push(null);weeks.push(wk);}
-  // DOM構築
-  var container=document.getElementById('cal-container');
-  var wrap=document.createElement('div');
-  wrap.style.cssText='display:inline-flex;flex-direction:column;gap:2px;min-width:'+(weeks.length*13+22)+'px;padding-bottom:4px';
-  // 月ラベル行
-  var mRow=document.createElement('div');
-  mRow.style.cssText='display:flex;gap:2px;padding-left:20px;height:16px;position:relative;margin-bottom:2px';
-  var lastMo=-1;
-  weeks.forEach(function(wk,wi){
-    var fd=wk.find(function(x){return x;});
-    if(fd&&fd>=start&&fd.getMonth()!==lastMo){
-      var sp=document.createElement('span');
-      sp.style.cssText='position:absolute;left:'+(wi*13)+'px;font-size:10px;color:var(--t2);white-space:nowrap';
-      sp.textContent=MONTHS[fd.getMonth()];
-      mRow.appendChild(sp);
-      lastMo=fd.getMonth();
-    }
-  });
-  wrap.appendChild(mRow);
-  // グリッド行
-  var gRow=document.createElement('div');
-  gRow.style.cssText='display:flex;gap:2px';
-  // 曜日ラベル列
-  var dCol=document.createElement('div');
-  dCol.style.cssText='display:flex;flex-direction:column;gap:2px;margin-right:3px';
-  DAY_LBLS.forEach(function(lbl){
-    var s=document.createElement('span');
-    s.style.cssText='font-size:9px;color:var(--t2);height:11px;line-height:11px;width:14px;text-align:right';
-    s.textContent=lbl;
-    dCol.appendChild(s);
-  });
-  gRow.appendChild(dCol);
-  // 週カラム
-  weeks.forEach(function(wk){
-    var col=document.createElement('div');
-    col.style.cssText='display:flex;flex-direction:column;gap:2px';
-    wk.forEach(function(day){
-      var cell=document.createElement('div');
-      if(!day||day>today){cell.style.cssText='width:11px;height:11px';col.appendChild(cell);return;}
-      var key=toLocalDateStr(day);
-      var inRange=day>=start;
-      var entry=map[key];
-      var lv=(inRange&&entry)?entry.level:0;
-      cell.className='cal-cell cal-l'+lv;
-      if(!inRange)cell.style.opacity='0';
-      if(inRange){
-        var info=entry&&entry.hours>0?
-          (day.getMonth()+1)+'月'+day.getDate()+'日: '+entry.hours+'h'+
-          (entry.hasPost?' | 投稿あり':'')+(entry.hasQ?' | Q&A有':''):
-          (day.getMonth()+1)+'月'+day.getDate()+'日: 記録なし';
-        cell.dataset.tip=info;
-        cell.addEventListener('mouseenter',_showCalTip);
-        cell.addEventListener('mousemove',_moveCalTip);
-        cell.addEventListener('mouseleave',_hideCalTip);
-        // タッチ対応
-        cell.addEventListener('touchstart',function(e){_calTipText(e.currentTarget.dataset.tip);},{ passive:true });
-      }
-      col.appendChild(cell);
-    });
-    gRow.appendChild(col);
-  });
-  wrap.appendChild(gRow);
-  container.innerHTML='';
-  container.appendChild(wrap);
-  // 統計バッジを更新
-  var totalH=data.reduce(function(s,d){return s+d.hours;},0);
-  var days=data.filter(function(d){return d.hours>0;}).length;
-  var badge=document.getElementById('cal-stats');
-  if(badge){
-    badge.textContent='期間内 '+days+'日勉強 / 合計 '+Math.round(totalH)+'h';
-  }
-}
-function _calTipText(txt){
-  if(!_calTip){_calTip=document.createElement('div');_calTip.style.cssText='position:fixed;background:var(--dk);color:#fff;padding:5px 10px;border-radius:8px;font-size:11px;pointer-events:none;z-index:9999;white-space:nowrap;line-height:1.5;top:50%;left:50%;transform:translate(-50%,-50%)';document.body.appendChild(_calTip);}
-  _calTip.textContent=txt;_calTip.style.display='block';
-  setTimeout(function(){if(_calTip)_calTip.style.display='none';},2000);
-}
-function _showCalTip(e){
-  if(!_calTip){_calTip=document.createElement('div');_calTip.style.cssText='position:fixed;background:var(--dk);color:#fff;padding:5px 10px;border-radius:8px;font-size:11px;pointer-events:none;z-index:9999;white-space:nowrap;line-height:1.5';document.body.appendChild(_calTip);}
-  _calTip.textContent=e.currentTarget.dataset.tip;_calTip.style.display='block';
-  _calTip.style.left=(e.clientX+14)+'px';_calTip.style.top=(e.clientY-36)+'px';
-}
-function _moveCalTip(e){if(_calTip){_calTip.style.left=(e.clientX+14)+'px';_calTip.style.top=(e.clientY-36)+'px';}}
-function _hideCalTip(){if(_calTip)_calTip.style.display='none';}
-
-// ── ロック画面表示 (Media Session API) ──────────────────────────
-// サイレント音声をバックグラウンドで流すことでロック画面に表示
-var silentAudioCtx=null;
-
-function startMediaSession(){
-  if(!('mediaSession' in navigator))return;
-  // サイレント音声ループ（ロック画面表示に必要）
-  try{
-    silentAudioCtx=new (window.AudioContext||window.webkitAudioContext)();
-    var buf=silentAudioCtx.createBuffer(1,silentAudioCtx.sampleRate,silentAudioCtx.sampleRate);
-    var src=silentAudioCtx.createBufferSource();
-    src.buffer=buf;src.loop=true;
-    src.connect(silentAudioCtx.destination);src.start(0);
-  }catch(e){}
-  // メディアコントロールボタンを無効化（誤操作防止）
-  ['play','pause','stop','seekbackward','seekforward','nexttrack','previoustrack'].forEach(function(a){
-    try{navigator.mediaSession.setActionHandler(a,function(){});}catch(e){}
-  });
-  navigator.mediaSession.metadata=new MediaMetadata({
-    title:'\u23f1 \u52c9\u5f37\u4e2d...',
-    artist:'\u25cf \u9006\u8ee2\u30a2\u30af\u30bb\u30e9\u30eb\u30fc\u30e0',
-    album:'\u4eca\u65e5\u3082\u9006\u8ee2\u3057\u3088\u3046!'
-  });
-}
-function updateMediaSession(timerStr){
-  if(!('mediaSession' in navigator))return;
-  navigator.mediaSession.metadata=new MediaMetadata({
-    title:'\u23f1 '+timerStr,
-    artist:'\u25cf '+(liveCountCache||'\u2014')+'\u4eba\u304c\u4e00\u7dd2\u306b\u52c9\u5f37\u4e2d',
-    album:'\u9006\u8ee2\u30a2\u30af\u30bb\u30e9\u30eb\u30fc\u30e0'
-  });
-}
-function stopMediaSession(){
-  if(silentAudioCtx){try{silentAudioCtx.close();}catch(e){}silentAudioCtx=null;}
-  if('mediaSession' in navigator)navigator.mediaSession.metadata=null;
-}
-
-// ── ハートビート（タブ生存確認） ──
-function startHeartbeat(){
-  if(heartbeatIv)clearInterval(heartbeatIv);
-  // すぐに1回送信
-  if(SESSION&&U)gasCall('updateHeartbeat',{studentCode:U.studentCode,sessionId:SESSION.sessionId,subject:selSubj||''},null,null);
-  heartbeatIv=setInterval(function(){
-    if(SESSION&&U)gasCall('updateHeartbeat',{studentCode:U.studentCode,sessionId:SESSION.sessionId,subject:selSubj||''},null,null);
-  },90000); // 90秒ごと（GAS側は5分無応答で退室）
-}
-
-// タブを閉じたとき・ページ離脱時に退室 (sendBeacon使用)
-window.addEventListener('beforeunload',function(){
-  if(SESSION&&U&&GAS_URL&&GAS_URL!=='ここにGASのURLを貼り付けてください'){
-    if(heartbeatIv){clearInterval(heartbeatIv);heartbeatIv=null;}
-    try{
-      var bTotalSecs=getElapsedStudySecs();
-      var bAllLaps=[];
-      laps.forEach(function(lap){var m=Math.round(lap.durationSecs/60);if(m>=1)bAllLaps.push({subject:lap.subject,mins:m});});
-      var bFinalSecs=Math.max(0,bTotalSecs-studySecsAtLapStart);
-      if(bFinalSecs>30)bAllLaps.push({subject:selSubj,mins:Math.max(1,Math.round(bFinalSecs/60))});
-      var payload=JSON.stringify({
-        action:'recordAllLaps',
-        studentCode:U.studentCode,
-        sessionId:SESSION.sessionId,
-        lapsJson:JSON.stringify(bAllLaps)
-      });
-      navigator.sendBeacon(GAS_URL,new Blob([payload],{type:'text/plain'}));
-    }catch(e){}
-  }
-});
-
-
-
-// ── 生存確認タイマー（120分ごと）──────────────────────────────
-function startConfirmTimer(){
-  if(confirmTimer)clearTimeout(confirmTimer);
-  confirmTimer=setTimeout(function(){
-    if(!inBrk&&!inTempPause&&SESSION)showConfirmModal();
-    else startConfirmTimer(); // ブレイク中なら再スケジュール
-  },CONFIRM_INTERVAL_MS);
-}
-function showConfirmModal(){
-  openModal('modal-confirm');
-  confirmSecsLeft=CONFIRM_TIMEOUT_MS/1000;
-  updateConfirmCountdown();
-  if(confirmCountdownIv)clearInterval(confirmCountdownIv);
-  confirmCountdownIv=setInterval(function(){
-    confirmSecsLeft--;
-    updateConfirmCountdown();
-    if(confirmSecsLeft<=0){clearInterval(confirmCountdownIv);autoTempPause();}
-  },1000);
-}
-function updateConfirmCountdown(){
-  var el=document.getElementById('confirm-countdown');
-  if(el){var m=Math.floor(confirmSecsLeft/60),s=confirmSecsLeft%60;el.textContent=p(m)+':'+p(s);}
-}
-function confirmStudying(){
-  if(confirmCountdownIv){clearInterval(confirmCountdownIv);confirmCountdownIv=null;}
-  closeModal('modal-confirm');
-  startConfirmTimer(); // 次の120分確認サイクルを再開（勉強タイマーは継続）
-  if(U)gasCall('postReport',{studentCode:U.studentCode,message:'\u2705 \u5f15\u304d\u7d9a\u304d\u52c9\u5f37\u4e2d\uff01\u307e\u3060\u307e\u3060\u9811\u5f35\u308a\u307e\u3059\uff01'},null,null);
-  toast('\u5f15\u304d\u7d9a\u304d\u9811\u5f35\u308a\u307e\u3057\u3087\u3046 \U0001f4aa');
-  loadTimeline(); // タイムライン更新
-}
-function startTempPause(){
-  if(confirmCountdownIv){clearInterval(confirmCountdownIv);confirmCountdownIv=null;}
-  closeModal('modal-confirm');
-  if(!inBrk)togBreak(); // ブレイク開始
-  toast('\u4e00\u6642\u4f11\u618a\u306b\u5207\u308a\u66ff\u3048\u307e\u3057\u305f \u2615');
-}
-function autoTempPause(){
-  if(confirmCountdownIv){clearInterval(confirmCountdownIv);confirmCountdownIv=null;}
-  closeModal('modal-confirm');
-  inTempPause=true;
-  if(!inBrk){
-    inBrk=true;brkStart=new Date();
-    document.getElementById('stbdg').className='stbdg brk';
-    document.getElementById('sdot').className='sdot brk';
-    document.getElementById('slbl').textContent='\u23f8 \u4e00\u6642\u9000\u51fa\u4e2d';
-    document.getElementById('tdisp').className='tdisp brk';
-    document.getElementById('pfill').className='pfill brk';
-    if(biv)clearInterval(biv);
-    biv=setInterval(function(){
-      var s=brkStart?Math.floor((new Date()-brkStart)/1000):0;
-      document.getElementById('tlbl').textContent='\u23f8 \u4e00\u6642\u9000\u51fa\u4e2d '+fmt(s);
-    },1000);
-    updateBrkUI();
+  var grid=document.getElementById('time-grid');
+  if(grid)grid.style.cursor=_schedEditMode?'crosshair':'pointer';
+  if(_schedEditMode){
+    toast('時間軸をドラッグして予定を作成できます 📅');
   }else{
-    document.getElementById('slbl').textContent='\u23f8 \u4e00\u6642\u9000\u51fa\u4e2d';
+    if(_schedDragging){_schedDragging=false;}
+    if(_schedPreview){_schedPreview.remove();_schedPreview=null;}
   }
-  toast('30\u5206\u5fdc\u7b54\u304c\u306a\u3044\u305f\u3081\u4e00\u6642\u9000\u51fa\u4e2d\u306b\u5909\u66f4\u3057\u307e\u3057\u305f\n\u300e\u518d\u958b\u300f\u30dc\u30bf\u30f3\u3067\u52c9\u5f37\u3092\u518d\u958b\u3067\u304d\u307e\u3059');
 }
-
-// ── ラップ表示 ──
-function lapMinsStr(secs){
-  var m=Math.floor(secs/60),h=Math.floor(m/60),rm=m%60;
-  if(h>0)return h+'時間'+(rm>0?rm+'分':'');
-  return (m>0?m+'分':secs+'秒');
-}
-function renderLapList(){
-  var summaryEl=document.getElementById('lap-summary');
-  var listEl=document.getElementById('lap-list');
-  if(!summaryEl||!listEl)return;
-  // ラップが1つ以上完了している場合のみ表示
-  var hasLaps=laps.length>0;
-  summaryEl.classList.toggle('hidden',!hasLaps);
-  if(!hasLaps)return;
-  var currentSecs=getElapsedStudySecs();
-  var html='';
-  // 完了済みラップ
-  laps.forEach(function(lap){
-    html+='<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;border-bottom:1px solid var(--bd)">'
-      +'<span style="font-size:12px;color:var(--t1)">'+esc(lap.subject)+'</span>'
-      +'<span style="font-size:12px;font-weight:700;color:var(--t0)">'+lapMinsStr(lap.durationSecs)+'</span></div>';
-  });
-  // 現在進行中のラップ
-  var curLapSecs=currentSecs-studySecsAtLapStart;
-  html+='<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0">'
-    +'<span style="font-size:12px;color:var(--m);font-weight:600">'+esc(selSubj)+'</span>'
-    +'<span style="font-size:12px;font-weight:700;color:var(--m)">'+lapMinsStr(curLapSecs)
-    +' <span style="font-size:10px;font-weight:400;color:var(--t2)">進行中</span></span></div>';
-  listEl.innerHTML=html;
-}
-
-function fmt(s){return p(Math.floor(s/3600))+':'+p(Math.floor((s%3600)/60))+':'+p(s%60)}
-function p(n){return String(n).padStart(2,'0')}
-function esc(str){return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
-function lsg(k){return localStorage.getItem(k)}
-function lss(obj){Object.keys(obj).forEach(function(k){localStorage.setItem(k,obj[k])})}
-var toT=null;
-function toast(msg){var el=document.getElementById('toast');el.textContent=msg;el.classList.add('show');if(toT)clearTimeout(toT);toT=setTimeout(function(){el.classList.remove('show')},2800)}
-function showLoading(show){document.getElementById('loading').classList.toggle('hidden',!show)}
-function showErr(msg){var el=document.getElementById('login-err');el.textContent=msg;el.style.display='block'}
-function clearErr(){document.getElementById('login-err').style.display='none'}
-document.addEventListener('click',function(e){if(!e.target.closest('.rki'))document.querySelectorAll('.stamp-picker').forEach(function(p){p.classList.remove('open')})});
 </script>
 </body>
 </html>
