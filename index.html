@@ -1928,37 +1928,9 @@ function buildTimeGrid(){
 
 
 
-// ── ドラッグ操作 + タップ作成 ─────────────────────────────────
+// ── ドラッグ作成 / タップ作成（Googleカレンダー風） ─────────────
 function initDragCreate(grid){
-  function startDrag(y){
-    if(_schedDragging)return;
-    _schedDragging=true;
-    _schedStartSlot=slotFromY(grid,y);
-    _schedEndSlot=_schedStartSlot;
-    _schedPreview=document.createElement('div');
-    _schedPreview.style.cssText=
-      'position:absolute;left:42px;right:0;border-radius:6px;opacity:0.5;z-index:5;pointer-events:none;'+
-      'background:'+SCH_COLORS[schedColorIdx%SCH_COLORS.length]+';'+
-      'top:'+(_schedStartSlot*SLOT_H)+'px;height:'+SLOT_H+'px;transition:height 0.03s';
-    grid.appendChild(_schedPreview);
-  }
-  function moveDrag(y){
-    if(!_schedDragging||!_schedPreview)return;
-    _schedEndSlot=slotFromY(grid,y);
-    var top=Math.min(_schedStartSlot,_schedEndSlot)*SLOT_H;
-    var h=(Math.abs(_schedEndSlot-_schedStartSlot)+1)*SLOT_H;
-    _schedPreview.style.top=top+'px';
-    _schedPreview.style.height=h+'px';
-  }
-  function endDrag(){
-    if(!_schedDragging)return;
-    _schedDragging=false;
-    if(_schedPreview){grid.removeChild(_schedPreview);_schedPreview=null;}
-    var s=Math.min(_schedStartSlot,_schedEndSlot);
-    var e=Math.max(_schedStartSlot,_schedEndSlot);
-    promptTaskInput(s,e);
-  }
-  // PC: マウス操作（編集モードのみドラッグ、それ以外はタップ作成）
+  // ── PC: クリック→モーダル、ドラッグ→枠作成 ─────────────────
   if(window._sMM)window.removeEventListener('mousemove',window._sMM);
   if(window._sMU)window.removeEventListener('mouseup',window._sMU);
   var _pc_dragged=false;
@@ -1966,45 +1938,76 @@ function initDragCreate(grid){
   window._sMU=function(){if(_schedDragging)endDrag();};
   grid.addEventListener('mousedown',function(ev){
     if(ev.target.closest('.sched-block'))return;
-    if(!_schedEditMode)return; // 編集モードのみドラッグ作成
-    _pc_dragged=false;
-    startDrag(ev.clientY);
+    _pc_dragged=false;startDrag(ev.clientY);
   });
   grid.addEventListener('click',function(ev){
     if(ev.target.closest('.sched-block'))return;
-    if(_schedEditMode||_pc_dragged)return; // 編集モードやドラッグ後はスキップ
-    _tapToCreate(grid,ev.clientY);
+    if(_pc_dragged)return;
+    _openTapCreate(grid,ev.clientY);
   });
   window.addEventListener('mousemove',window._sMM);
   window.addEventListener('mouseup',window._sMU);
-  // スマホ: 編集モードOFF→タップで作成、ON→縦ドラッグで作成
-  var _pty=0,_ptx=0,_ptp=false,_ptMoved=false;
+
+  // ── スマホ: 長押し(400ms)→ドラッグ作成 / 短タップ→モーダル ──
+  var _lpTimer=null,_lpSY=0,_lpSX=0,_lpFired=false,_lpScrolled=false;
+
   grid.addEventListener('touchstart',function(ev){
     if(ev.target.closest('.sched-block'))return;
-    _pty=ev.touches[0].clientY;_ptx=ev.touches[0].clientX;_ptp=true;_ptMoved=false;
+    _lpSY=ev.touches[0].clientY;_lpSX=ev.touches[0].clientX;
+    _lpFired=false;_lpScrolled=false;
+    _lpTimer=setTimeout(function(){
+      if(_lpScrolled)return;
+      _lpFired=true;
+      // バイブレーション（対応端末のみ）
+      if(navigator.vibrate)navigator.vibrate(40);
+      // 長押しインジケーター
+      var dot=document.createElement('div');
+      dot.style.cssText='position:absolute;left:46px;right:4px;'+
+        'top:'+((slotFromY(grid,_lpSY))*SLOT_H)+'px;height:'+SLOT_H+'px;'+
+        'background:var(--m);opacity:0.35;border-radius:6px;z-index:6;pointer-events:none';
+      dot.id='sched-lp-ind';grid.appendChild(dot);
+      startDrag(_lpSY);
+    },400);
   },{passive:true});
+
   grid.addEventListener('touchmove',function(ev){
     var cy=ev.touches[0].clientY,cx=ev.touches[0].clientX;
-    if(_ptp){
-      var dy=Math.abs(cy-_pty),dx=Math.abs(cx-_ptx);
-      if(dy>12&&dy>dx*1.2){
-        _ptMoved=true;_ptp=false;
-        if(_schedEditMode){ev.preventDefault();startDrag(_pty);moveDrag(cy);}
-        // 編集モードOFF時は縦スクロールに任せる
-      }else if(dx>8||dy>8){_ptp=false;}
-      return;
+    if(!_lpFired){
+      // 長押し待機中に大きく動いたらスクロール確定
+      if(Math.abs(cy-_lpSY)>12||Math.abs(cx-_lpSX)>12){
+        _lpScrolled=true;clearTimeout(_lpTimer);_lpTimer=null;
+      }
+      return; // スクロールに任せる
     }
-    if(_schedDragging){ev.preventDefault();moveDrag(cy);}
+    // 長押し確定後 → ドラッグ作成
+    ev.preventDefault();moveDrag(cy);
   },{passive:false});
-  grid.addEventListener('touchend',function(ev){
-    var wasPending=_ptp;_ptp=false;
+
+  grid.addEventListener('touchend',function(){
+    clearTimeout(_lpTimer);_lpTimer=null;
+    var ind=document.getElementById('sched-lp-ind');if(ind)ind.remove();
     if(_schedDragging){endDrag();return;}
-    // タップ（移動なし）→ タップ作成（編集モードOFF時のみ）
-    if(wasPending&&!_ptMoved&&!_schedEditMode){
-      _tapToCreate(grid,_pty);
+    // 短タップ（スクロールなし・長押しなし）→ モーダルで追加
+    if(!_lpFired&&!_lpScrolled){
+      _openTapCreate(grid,_lpSY);
     }
+    _lpFired=false;
   });
 }
+
+// タップ時に追加モーダルを開く（タスク名 + 時間調整）
+function _openTapCreate(grid,y){
+  var slot=slotFromY(grid,y);
+  var endSlot=Math.min(slot+3,(GRID_END-GRID_START)*4-1);
+  _pendingS=slot;_pendingE=endSlot;
+  var ttl=document.getElementById('task-inp-ttl');
+  if(ttl)ttl.textContent=slotToHHMM(slot)+'〜'+slotToHHMM(endSlot+1)+' に予定を追加';
+  var inp=document.getElementById('task-inp-text');if(inp)inp.value='';
+  openModal('modal-task-inp');
+  setTimeout(function(){var i=document.getElementById('task-inp-text');if(i)i.focus();},200);
+}
+
+
 
 // ── タスク名入力モーダル ──────────────────────────────────
 function promptTaskInput(s,e){
