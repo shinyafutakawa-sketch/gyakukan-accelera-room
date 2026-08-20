@@ -458,6 +458,29 @@ function gasCall(action,params,onSuccess,onError){
     <button class="back-btn" style="color:var(--or);font-weight:700;font-size:13px" onclick="startTempPause()">☕ 一時休憩する</button>
   </div>
 </div>
+<!-- BLOCK EDIT MODAL (タップで開く予定編集) -->
+<div class="moverlay hidden" id="modal-block-edit" style="z-index:360">
+  <div class="msheet" style="max-width:380px">
+    <div class="mttl" style="font-size:15px">📌 予定を編集</div>
+    <div style="margin-bottom:10px">
+      <div style="font-size:11px;font-weight:700;color:var(--t0);margin-bottom:4px">タスク名</div>
+      <input id="block-edit-task" class="finp" type="text" maxlength="25" placeholder="例）数学 過去問">
+    </div>
+    <div style="display:flex;gap:10px;margin-bottom:16px">
+      <div style="flex:1">
+        <div style="font-size:11px;font-weight:700;color:var(--t0);margin-bottom:4px">開始</div>
+        <select id="block-edit-start" class="finp" style="padding:8px 6px;font-size:13px"></select>
+      </div>
+      <div style="flex:1">
+        <div style="font-size:11px;font-weight:700;color:var(--t0);margin-bottom:4px">終了</div>
+        <select id="block-edit-end" class="finp" style="padding:8px 6px;font-size:13px"></select>
+      </div>
+    </div>
+    <button class="btn-cta" onclick="saveBlockEdit()">保存する ✅</button>
+    <button onclick="deleteBlockEdit()" style="width:100%;padding:10px;margin-top:8px;border:1.5px solid var(--rd);background:none;border-radius:10px;font-size:13px;color:var(--rd);cursor:pointer;font-family:inherit;font-weight:700">削除する 🗑️</button>
+    <button class="back-btn" onclick="closeModal('modal-block-edit')">キャンセル</button>
+  </div>
+</div>
 <!-- TASK INPUT MODAL (スケジュールブロック名入力) -->
 <div class="moverlay hidden" id="modal-task-inp" style="z-index:350">
   <div class="msheet" style="max-width:380px">
@@ -538,8 +561,9 @@ function gasCall(action,params,onSuccess,onError){
     <!-- 保存ボタン -->
     <div style="position:sticky;bottom:0;background:var(--bg);padding:12px 16px;border-top:1px solid var(--bd)">
       <div style="display:flex;gap:8px">
-        <button onclick="clearSchedule()" style="flex:1;border:1.5px solid var(--bd);background:none;border-radius:10px;padding:12px;font-size:13px;cursor:pointer;font-family:inherit;color:var(--t1)">クリア</button>
-        <button onclick="saveScheduleData()" style="flex:2;background:var(--m);color:#fff;border:none;border-radius:10px;padding:12px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit">保存する ✅</button>
+        <button onclick="clearSchedule()" style="flex:1;border:1.5px solid var(--bd);background:none;border-radius:10px;padding:11px 6px;font-size:12px;cursor:pointer;font-family:inherit;color:var(--t1)">クリア</button>
+        <button id="sched-edit-toggle" onclick="toggleSchedEditMode()" style="flex:1;border:1.5px solid var(--bd);background:none;border-radius:10px;padding:11px 6px;font-size:12px;cursor:pointer;font-family:inherit;color:var(--t1)">🗒️ 編集</button>
+        <button onclick="saveScheduleData()" style="flex:2;background:var(--m);color:#fff;border:none;border-radius:10px;padding:11px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">保存する ✅</button>
       </div>
     </div>
   </div>
@@ -1902,22 +1926,9 @@ function buildTimeGrid(){
   initDragCreate(grid);
 }
 
-// ── 編集モードトグル ────────────────────────────────────────
-var _schedEditMode=false;
-function toggleSchedEditMode(){
-  _schedEditMode=!_schedEditMode;
-  var btn=document.getElementById('sched-edit-btn');
-  var lbl=btn?btn.nextElementSibling:null;
-  if(btn){
-    btn.textContent=_schedEditMode?'✅ 追加モード中（タップで終了）':'✏️ ブロックを追加する';
-    btn.style.background=_schedEditMode?'#22C55E':'var(--m)';
-  }
-  if(lbl)lbl.textContent=_schedEditMode?'時間軸をドラッグして予定を追加':'← タップして追加モードに';
-  var grid=document.getElementById('time-grid');
-  if(grid)grid.style.cursor=_schedEditMode?'crosshair':'default';
-}
 
-// ── ドラッグ操作（モバイルは編集モード時のみ、PC は常時） ───
+
+// ── ドラッグ操作 + タップ作成 ─────────────────────────────────
 function initDragCreate(grid){
   function startDrag(y){
     if(_schedDragging)return;
@@ -1947,34 +1958,52 @@ function initDragCreate(grid){
     var e=Math.max(_schedStartSlot,_schedEndSlot);
     promptTaskInput(s,e);
   }
-  // PC: マウス操作（常時有効） ※ 重複登録防止のため一度削除してから追加
+  // PC: マウス操作（編集モードのみドラッグ、それ以外はタップ作成）
   if(window._sMM)window.removeEventListener('mousemove',window._sMM);
   if(window._sMU)window.removeEventListener('mouseup',window._sMU);
-  window._sMM=function(ev){moveDrag(ev.clientY);};
+  var _pc_dragged=false;
+  window._sMM=function(ev){if(_schedDragging){_pc_dragged=true;moveDrag(ev.clientY);}};
   window._sMU=function(){if(_schedDragging)endDrag();};
   grid.addEventListener('mousedown',function(ev){
     if(ev.target.closest('.sched-block'))return;
+    if(!_schedEditMode)return; // 編集モードのみドラッグ作成
+    _pc_dragged=false;
     startDrag(ev.clientY);
+  });
+  grid.addEventListener('click',function(ev){
+    if(ev.target.closest('.sched-block'))return;
+    if(_schedEditMode||_pc_dragged)return; // 編集モードやドラッグ後はスキップ
+    _tapToCreate(grid,ev.clientY);
   });
   window.addEventListener('mousemove',window._sMM);
   window.addEventListener('mouseup',window._sMU);
-  // スマホ: 縦ドラッグで予定作成（横スクロールとの判別あり）
-  var _pty=0,_ptx=0,_ptp=false;
+  // スマホ: 編集モードOFF→タップで作成、ON→縦ドラッグで作成
+  var _pty=0,_ptx=0,_ptp=false,_ptMoved=false;
   grid.addEventListener('touchstart',function(ev){
     if(ev.target.closest('.sched-block'))return;
-    _pty=ev.touches[0].clientY;_ptx=ev.touches[0].clientX;_ptp=true;
+    _pty=ev.touches[0].clientY;_ptx=ev.touches[0].clientX;_ptp=true;_ptMoved=false;
   },{passive:true});
   grid.addEventListener('touchmove',function(ev){
     var cy=ev.touches[0].clientY,cx=ev.touches[0].clientX;
     if(_ptp){
       var dy=Math.abs(cy-_pty),dx=Math.abs(cx-_ptx);
-      if(dy>14&&dy>dx*1.5){_ptp=false;ev.preventDefault();startDrag(_pty);moveDrag(cy);}
-      else if(dy>8||dx>8){_ptp=false;} // スクロール確定
+      if(dy>12&&dy>dx*1.2){
+        _ptMoved=true;_ptp=false;
+        if(_schedEditMode){ev.preventDefault();startDrag(_pty);moveDrag(cy);}
+        // 編集モードOFF時は縦スクロールに任せる
+      }else if(dx>8||dy>8){_ptp=false;}
       return;
     }
     if(_schedDragging){ev.preventDefault();moveDrag(cy);}
   },{passive:false});
-  grid.addEventListener('touchend',function(){_ptp=false;if(_schedDragging)endDrag();});
+  grid.addEventListener('touchend',function(ev){
+    var wasPending=_ptp;_ptp=false;
+    if(_schedDragging){endDrag();return;}
+    // タップ（移動なし）→ タップ作成（編集モードOFF時のみ）
+    if(wasPending&&!_ptMoved&&!_schedEditMode){
+      _tapToCreate(grid,_pty);
+    }
+  });
 }
 
 // ── タスク名入力モーダル ──────────────────────────────────
@@ -1987,6 +2016,86 @@ function promptTaskInput(s,e){
 }
 
 // ── 全ブロック描画 ───────────────────────────────────────
+
+// ── スケジュール編集モード ────────────────────────────────────
+var _schedEditMode=false;
+function toggleSchedEditMode(){
+  _schedEditMode=!_schedEditMode;
+  var btn=document.getElementById('sched-edit-toggle');
+  if(btn){
+    btn.style.background=_schedEditMode?'var(--m)':'none';
+    btn.style.color=_schedEditMode?'#fff':'var(--t1)';
+    btn.textContent=_schedEditMode?'✅ 編集中':'🗒️ 編集';
+  }
+  var grid=document.getElementById('time-grid');
+  if(grid)grid.style.cursor=_schedEditMode?'crosshair':'pointer';
+  if(_schedEditMode)toast('ドラッグして予定の枠を作成できます');
+}
+
+// ── 時間セレクターのオプション生成 ────────────────────────────
+function _buildTimeOpts(selectedSlot){
+  var opts='';
+  for(var s=0;s<=(GRID_END-GRID_START)*4;s++){
+    var h=GRID_START+Math.floor(s/4),m=(s%4)*15;
+    var t=String(h).padStart(2,'0')+':'+String(m).padStart(2,'0');
+    opts+='<option value="'+s+'"'+(s===selectedSlot?' selected':'')+'>'+t+'</option>';
+  }
+  return opts;
+}
+
+// ── ブロックをタップして編集モーダルを開く ──────────────────
+var _editingBlockId='';
+function openBlockEdit(blockId){
+  var block=schedBlocks.find(function(b){return b.id===blockId;});
+  if(!block)return;
+  _editingBlockId=blockId;
+  var ti=document.getElementById('block-edit-task');
+  if(ti)ti.value=block.task;
+  var ss=document.getElementById('block-edit-start');
+  var es=document.getElementById('block-edit-end');
+  if(ss)ss.innerHTML=_buildTimeOpts(block.startSlot);
+  if(es)es.innerHTML=_buildTimeOpts(block.endSlot+1);
+  openModal('modal-block-edit');
+  setTimeout(function(){var t=document.getElementById('block-edit-task');if(t)t.focus();},200);
+}
+function saveBlockEdit(){
+  var block=schedBlocks.find(function(b){return b.id===_editingBlockId;});
+  if(!block){closeModal('modal-block-edit');return;}
+  var ti=document.getElementById('block-edit-task');
+  var ss=document.getElementById('block-edit-start');
+  var es=document.getElementById('block-edit-end');
+  var newTask=ti?ti.value.trim():block.task;
+  var ns=ss?parseInt(ss.value):block.startSlot;
+  var ne=es?Math.max(parseInt(es.value)-1,ns):block.endSlot;
+  if(newTask)block.task=newTask;
+  block.startSlot=ns;block.endSlot=ne;
+  closeModal('modal-block-edit');
+  renderAllBlocks();
+}
+function deleteBlockEdit(){
+  schedBlocks=schedBlocks.filter(function(b){return b.id!==_editingBlockId;});
+  closeModal('modal-block-edit');
+  renderAllBlocks();
+}
+
+// ── タップ(click)で追加モーダルを開く（編集モードOFF時） ────
+function _tapToCreate(grid,y){
+  var slot=slotFromY(grid,y);
+  var endSlot=Math.min(slot+3,(GRID_END-GRID_START)*4-1);
+  // タスク入力モーダルを使う
+  _pendingS=slot;_pendingE=endSlot;
+  var ttl=document.getElementById('task-inp-ttl');
+  if(ttl)ttl.textContent=slotToHHMM(slot)+'〜'+slotToHHMM(endSlot+1);
+  var si=document.getElementById('block-edit-start');
+  var ei=document.getElementById('block-edit-end');
+  if(si)si.innerHTML=_buildTimeOpts(slot);
+  if(ei)ei.innerHTML=_buildTimeOpts(endSlot+1);
+  // カスタムモーダルで時間調整可能な追加UIを開く
+  var inp=document.getElementById('task-inp-text');if(inp)inp.value='';
+  openModal('modal-task-inp');
+  setTimeout(function(){var i=document.getElementById('task-inp-text');if(i)i.focus();},200);
+}
+
 function renderAllBlocks(){
   document.querySelectorAll('#time-grid .sched-block').forEach(function(el){el.remove();});
   var grid=document.getElementById('time-grid');if(!grid)return;
@@ -2004,11 +2113,12 @@ function renderAllBlocks(){
       '<div style="font-size:12px;font-weight:700;line-height:1.3">'+esc(b.task)+'</div>';
     div.addEventListener('click',function(ev){
       ev.stopPropagation();
-      if(confirm('「'+b.task+'」を削除しますか？')){
-        schedBlocks=schedBlocks.filter(function(x){return x.id!==b.id;});
-        renderAllBlocks();
-      }
+      openBlockEdit(b.id); // タップで編集モーダルを開く
     });
+    div.addEventListener('touchend',function(ev){
+      ev.stopPropagation();ev.preventDefault();
+      openBlockEdit(b.id);
+    },{passive:false});
     grid.appendChild(div);
   });
 }
