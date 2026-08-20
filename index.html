@@ -499,12 +499,14 @@ function gasCall(action,params,onSuccess,onError){
 <div class="moverlay hidden" id="modal-schedule" style="z-index:250;align-items:flex-start">
   <div style="background:var(--bg);width:100%;max-width:480px;max-height:100vh;height:100%;overflow-y:auto;-webkit-overflow-scrolling:touch;display:flex;flex-direction:column;margin:0 auto;position:relative">
     <!-- ヘッダー -->
-    <div style="position:sticky;top:0;background:var(--bg);z-index:10;padding:14px 16px 10px;border-bottom:1px solid var(--bd);display:flex;align-items:center;justify-content:space-between">
-      <div>
-        <div style="font-size:15px;font-weight:800;color:var(--dk)">📅 今日のスケジュール</div>
-        <div id="sched-date" style="font-size:11px;color:var(--t2)"></div>
+    <div style="position:sticky;top:0;background:var(--bg);z-index:10;padding:10px 14px;border-bottom:1px solid var(--bd);display:flex;align-items:center;gap:8px">
+      <button onclick="schedPrevDay()" style="background:var(--bg2);border:1px solid var(--bd);border-radius:8px;padding:4px 10px;font-size:16px;cursor:pointer;color:var(--t1);flex-shrink:0">‹</button>
+      <div style="flex:1;text-align:center">
+        <div style="font-size:13px;font-weight:800;color:var(--dk)">📅 スケジュール</div>
+        <div id="sched-date" style="font-size:11px;color:var(--m);font-weight:700"></div>
       </div>
-      <button onclick="closeModal('modal-schedule')" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--t2);padding:4px">✕</button>
+      <button id="sched-next-btn" onclick="schedNextDay()" style="background:var(--bg2);border:1px solid var(--bd);border-radius:8px;padding:4px 10px;font-size:16px;cursor:pointer;color:var(--t1);flex-shrink:0">›</button>
+      <button onclick="closeModal('modal-schedule')" style="background:none;border:none;font-size:18px;cursor:pointer;color:var(--t2);padding:4px;flex-shrink:0">✕</button>
     </div>
     <!-- 機能3: ガイドパネル -->
     <details style="margin:10px 16px 4px;border:1px solid var(--l);border-radius:10px;overflow:hidden">
@@ -531,15 +533,7 @@ function gasCall(action,params,onSuccess,onError){
     </details>
     <!-- タイムグリッド -->
     <div style="padding:0 16px 10px;flex:1">
-      <!-- 編集モードトグル -->
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-        <button id="sched-edit-btn" onclick="toggleSchedEditMode()"
-          style="background:var(--m);color:#fff;border:none;border-radius:20px;padding:5px 14px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">
-          ✏️ ブロックを追加する
-        </button>
-        <span style="font-size:11px;color:var(--t2)">← タップして追加モードに</span>
-      </div>
-      <div id="time-grid" style="position:relative;user-select:none;-webkit-user-select:none"></div>
+            <div id="time-grid" style="position:relative;user-select:none;-webkit-user-select:none"></div>
     </div>
     <!-- 保存ボタン -->
     <div style="position:sticky;bottom:0;background:var(--bg);padding:12px 16px;border-top:1px solid var(--bd)">
@@ -635,17 +629,17 @@ function gasCall(action,params,onSuccess,onError){
   <div class="manual-sheet">
     <div class="manual-hdr"><div class="manual-ttl">📖 逆転アクセラルームの使い方</div><button class="manual-close" onclick="closeModal('modal-manual')">✕</button></div>
     <div class="manual-body">
-      <div class="man-sec"><div class="man-sec-ttl">🚪 入室の手順</div><ul class="man-sec-line"><li>生徒コード（例：s000001）を入力</li><li>氏名を「苗字 名前」の形式で入力（間に半角スペース）</li><li>科目を選択して意気込みを入力（任意）</li><li>「入室する」ボタンをタップ</li></ul></div>
+      <div class="man-sec"><div class="man-sec-ttl">🚀 入室の手順</div><ul class="man-sec-line"><li>生徒コード（例：s000001）と氏名（苗字 名前）でログイン</li><li>科目を選択 → 「入室する」をタップ</li><li>意気込みを入力してタイムラインに投稿（任意）</li><li>スケジュールが未作成の場合はそのまま作成できます</li></ul></div>
       <div class="man-div"></div>
-      <div class="man-sec"><div class="man-sec-ttl">🎯 週間目標の設定</div><ul class="man-sec-line"><li>勉強前ダッシュボードの「目標を変更」から設定</li><li>1〜40時間の範囲で設定可能</li></ul></div>
+      <div class="man-sec"><div class="man-sec-ttl">📅 スケジュール機能</div><ul class="man-sec-line"><li>ダッシュボードの「今日のスケジュール」ボタンから作成</li><li>時間軸をドラッグして予定ブロックを作成（PC・スマホ両対応）</li><li>‹ › ボタンで前日のスケジュールも確認できます</li><li>「保存する」でスプレッドシートに記録されます</li></ul></div>
       <div class="man-div"></div>
-      <div class="man-sec"><div class="man-sec-ttl">☕ 休憩・❤️ いいね・👏 スタンプ</div><ul class="man-sec-line"><li>「休憩」ボタンで一時停止（休憩時間は学習時間に含まれません）</li><li>タイムラインの投稿に ❤️ いいねができます</li><li>ランキングの 👏 ボタンで頑張っている人にスタンプを送れます</li></ul></div>
+      <div class="man-sec"><div class="man-sec-ttl">💬 Q&Aチャット</div><ul class="man-sec-line"><li>コーチがチェックイン中のみ質問を送信できます</li><li>チェックアウト15分前は受付終了となります</li><li>返信が届くと通知バナーが表示されます</li><li>複雑な質問はZoomで対応します</li></ul></div>
       <div class="man-div"></div>
-      <div class="man-sec"><div class="man-sec-ttl">💬 Q&Aチャット</div><ul class="man-sec-line"><li>コーチへの質問はQ&Aチャットから送信</li><li>平日 18:00〜22:00 は10分以内に返信</li><li>複雑な内容はZoomで対応します</li></ul></div>
+      <div class="man-sec"><div class="man-sec-ttl">⏱️ 勉強中の機能</div><ul class="man-sec-line"><li>「休憩」ボタンで一時停止（休憩中は時間加算なし）</li><li>「▼ 科目変更」で科目を切り替えると自動でラップ記録</li><li>タイムラインに一言投稿して宣言できます</li><li>ランキングの 👏 でスタンプを送れます</li></ul></div>
       <div class="man-div"></div>
-      <div class="man-sec"><div class="man-sec-ttl">🔥 連続記録レベル</div><div class="level-row"><div class="level-item"><span class="level-badge">🌱 スタート</span>初回〜2日</div><div class="level-item"><span class="level-badge">⚡ 加速中</span>3日連続〜</div><div class="level-item"><span class="level-badge">🔥 熱量上昇中</span>7日連続〜</div><div class="level-item"><span class="level-badge">💪 本気モード</span>14日連続〜</div><div class="level-item"><span class="level-badge">🏆 逆転の申し子</span>30日連続〜</div></div></div>
+      <div class="man-sec"><div class="man-sec-ttl">🚪 退室の流れ</div><ul class="man-sec-line"><li>「退室」ボタン → 科目別の勉強時間を確認・修正</li><li>今日の振り返りを入力（任意）</li><li>満足度（😞〜🎉）と改善案を入力（任意）</li><li>「退室して記録する」で完了・スプレッドシートに保存</li></ul></div>
       <div class="man-div"></div>
-      <div class="man-sec"><div class="man-sec-ttl">🚪 退室の流れ</div><ul class="man-sec-line"><li>タイマーカードの「退室」ボタンをタップ</li><li>今日の振り返りを入力（任意）</li><li>逆転アクセラルームの満足度を選択（1〜5）</li><li>「退室して記録する」で完了</li></ul></div>
+      <div class="man-sec"><div class="man-sec-ttl">🔥 連続記録レベル</div><div class="level-row"><div class="level-item"><span class="level-badge">🌱 スタート</span>初回〜2日</div><div class="level-item"><span class="level-badge">⚡ 加速中</span>3日〜</div><div class="level-item"><span class="level-badge">🔥 熱量上昇中</span>7日〜</div><div class="level-item"><span class="level-badge">💪 本気モード</span>14日〜</div><div class="level-item"><span class="level-badge">🏆 逆転の申し子</span>30日〜</div></div></div>
     </div>
   </div>
 </div>
@@ -1764,6 +1758,7 @@ var SCH_COLORS = ['#207B97','#2E9E6B','#D45280','#C25A0A','#5B4DA7','#207B97','#
 var schedBlocks= [];
 var schedColorIdx=0;
 var _schedDragging=false,_schedStartSlot=-1,_schedEndSlot=-1,_schedPreview=null;
+var _schedCurrentDate=null; // 現在表示中の日付
 
 function todayDateStr(){
   var d=new Date();
@@ -1802,41 +1797,65 @@ function updateSchedBtn(){
 }
 
 function openScheduleModal(){
-  // 日付表示
-  var dateEl=document.getElementById('sched-date');
-  if(dateEl){
-    var now=new Date();
-    dateEl.textContent=(now.getMonth()+1)+'月'+now.getDate()+'日（'+
-      ['日','月','火','水','木','金','土'][now.getDay()]+'）';
-  }
   // バナーを非表示
   var wb=document.getElementById('sched-warn-banner');if(wb)wb.classList.add('hidden');
-  // グリッド構築（毎回リセット）
-  buildTimeGrid();
-  // 既存スケジュールを読み込む（15分スロット換算）
-  if(U){
-    gasCall('getSchedule',{studentCode:U.studentCode,date:todayDateStr()},function(res){
-      if(res&&res.success&&res.schedule&&res.schedule!=='[]'){
-        try{
-          var saved=JSON.parse(res.schedule);
-          schedBlocks=saved.map(function(b,i){
-            var sp=b.start.split(':'), ep=b.end.split(':');
-            var ss=(Number(sp[0])-GRID_START)*4+Math.round(Number(sp[1])/15);
-            var es=(Number(ep[0])-GRID_START)*4+Math.round(Number(ep[1])/15)-1;
-            return{id:b.id||'b'+i,startSlot:Math.max(0,ss),endSlot:Math.max(0,es),
-                   task:b.task,color:b.color||SCH_COLORS[i%SCH_COLORS.length]};
-          });
-          renderAllBlocks();
-        }catch(e){ console.error('Schedule load error:',e);toast('読み込みエラー: '+e.message); }
-      }
-    },function(e){ console.error('getSchedule failed:',e); });
-  }
-  // モーダルを開く（※ ara_sched_date はここでは保存しない）
+  // 今日を初期日付に設定
+  _schedCurrentDate=new Date();
+  _schedCurrentDate.setHours(0,0,0,0);
+  _loadSchedForDate(_schedCurrentDate);
   openModal('modal-schedule');
-  // 編集モードをリセット
-  _schedEditMode=false;
-  var eb=document.getElementById('sched-edit-btn');
-  if(eb){eb.textContent='✏️ ブロックを追加する';eb.style.background='var(--m)';}
+}
+function _dateToStr(d){
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+function _updateSchedHeader(){
+  var d=_schedCurrentDate||new Date();
+  var dateEl=document.getElementById('sched-date');
+  if(dateEl){
+    var today=new Date();today.setHours(0,0,0,0);
+    var isToday=d.getTime()===today.getTime();
+    dateEl.textContent=(d.getMonth()+1)+'月'+d.getDate()+'日（'+['日','月','火','水','木','金','土'][d.getDay()]+'）'+(isToday?' 今日':'');
+  }
+  // 翌日以降には進めない
+  var tomorrow=new Date();tomorrow.setHours(0,0,0,0);tomorrow.setDate(tomorrow.getDate()+1);
+  var nb=document.getElementById('sched-next-btn');
+  if(nb){nb.disabled=(d>=tomorrow);nb.style.opacity=(d>=tomorrow)?'0.3':'1';}
+}
+function schedPrevDay(){
+  if(!_schedCurrentDate)return;
+  _schedCurrentDate=new Date(_schedCurrentDate);
+  _schedCurrentDate.setDate(_schedCurrentDate.getDate()-1);
+  _loadSchedForDate(_schedCurrentDate);
+}
+function schedNextDay(){
+  if(!_schedCurrentDate)return;
+  var next=new Date(_schedCurrentDate);
+  next.setDate(next.getDate()+1);
+  var tomorrow=new Date();tomorrow.setHours(0,0,0,0);tomorrow.setDate(tomorrow.getDate()+1);
+  if(next>=tomorrow)return;
+  _schedCurrentDate=next;
+  _loadSchedForDate(_schedCurrentDate);
+}
+function _loadSchedForDate(d){
+  _updateSchedHeader();
+  buildTimeGrid();
+  schedBlocks=[];
+  if(!U)return;
+  var dateStr=_dateToStr(d);
+  gasCall('getSchedule',{studentCode:U.studentCode,date:dateStr},function(res){
+    if(res&&res.success&&res.schedule&&res.schedule!=='[]'){
+      try{
+        var saved=JSON.parse(res.schedule);
+        schedBlocks=saved.map(function(b,i){
+          var sp=b.start.split(':'),ep=b.end.split(':');
+          var ss=(Number(sp[0])-GRID_START)*4+Math.round(Number(sp[1])/15);
+          var es=(Number(ep[0])-GRID_START)*4+Math.round(Number(ep[1])/15)-1;
+          return{id:b.id||'b'+i,startSlot:Math.max(0,ss),endSlot:Math.max(0,es),task:b.task,color:b.color||SCH_COLORS[i%SCH_COLORS.length]};
+        });
+        renderAllBlocks();
+      }catch(e){console.error('Schedule load error:',e);}
+    }
+  },null);
 }
 
 // ── タイムグリッド構築 ─────────────────────────────────────
@@ -1939,19 +1958,23 @@ function initDragCreate(grid){
   });
   window.addEventListener('mousemove',window._sMM);
   window.addEventListener('mouseup',window._sMU);
-  // スマホ: 編集モード時のみドラッグ有効・それ以外はスクロール
+  // スマホ: 縦ドラッグで予定作成（横スクロールとの判別あり）
+  var _pty=0,_ptx=0,_ptp=false;
   grid.addEventListener('touchstart',function(ev){
-    if(!_schedEditMode)return; // 編集モード外はスクロール優先
     if(ev.target.closest('.sched-block'))return;
-    ev.preventDefault();
-    startDrag(ev.touches[0].clientY);
-  },{passive:false});
+    _pty=ev.touches[0].clientY;_ptx=ev.touches[0].clientX;_ptp=true;
+  },{passive:true});
   grid.addEventListener('touchmove',function(ev){
-    if(!_schedDragging)return;
-    ev.preventDefault();
-    moveDrag(ev.touches[0].clientY);
+    var cy=ev.touches[0].clientY,cx=ev.touches[0].clientX;
+    if(_ptp){
+      var dy=Math.abs(cy-_pty),dx=Math.abs(cx-_ptx);
+      if(dy>14&&dy>dx*1.5){_ptp=false;ev.preventDefault();startDrag(_pty);moveDrag(cy);}
+      else if(dy>8||dx>8){_ptp=false;} // スクロール確定
+      return;
+    }
+    if(_schedDragging){ev.preventDefault();moveDrag(cy);}
   },{passive:false});
-  grid.addEventListener('touchend',function(){if(_schedDragging)endDrag();});
+  grid.addEventListener('touchend',function(){_ptp=false;if(_schedDragging)endDrag();});
 }
 
 // ── タスク名入力モーダル ──────────────────────────────────
@@ -1997,13 +2020,14 @@ function saveScheduleData(){
   var payload=schedBlocks.map(function(b){
     return{id:b.id,start:slotToHHMM(b.startSlot),end:slotToHHMM(b.endSlot+1),task:b.task,color:b.color};
   });
+  var saveDate=_schedCurrentDate?_dateToStr(_schedCurrentDate):todayDateStr();
+  var isToday=saveDate===todayDateStr();
   openModal('modal-saving'); // 保存中ダイアログを表示
-  gasCall('saveSchedule',{studentCode:U.studentCode,date:todayDateStr(),schedule:JSON.stringify(payload)},
+  gasCall('saveSchedule',{studentCode:U.studentCode,date:saveDate,schedule:JSON.stringify(payload)},
     function(res){
       closeModal('modal-saving');
       if(res&&res.success){
-        localStorage.setItem('ara_sched_date',todayDateStr());
-        updateSchedBtn();
+        if(isToday){localStorage.setItem('ara_sched_date',todayDateStr());updateSchedBtn();}
         toast('スケジュールを保存しました ✅');
         closeModal('modal-schedule');
       }else{
