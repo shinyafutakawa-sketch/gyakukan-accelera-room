@@ -992,6 +992,14 @@ var confirmTimer=null,confirmCountdownIv=null,confirmSecsLeft=0;
 var CONFIRM_INTERVAL_MS=120*60*1000; // 120分ごとに確認
 var CONFIRM_TIMEOUT_MS=30*60*1000;   // 30分応答なしで一時退出
 
+// ★ バグ修正：lsg()/lss()（localStorage読み書きの短縮ヘルパー）が
+//   コード中で多数呼び出されているが定義が存在せず、
+//   ReferenceError: lss is not defined 等でログイン成功後の処理が
+//   停止していた（ステータスは「接続エラー」と誤表示されていたが、
+//   実際は認証成功後のクラッシュだった）。
+function lsg(key){ return localStorage.getItem(key); }
+function lss(obj){ Object.keys(obj).forEach(function(k){ localStorage.setItem(k, obj[k]); }); }
+
 window.addEventListener('load',function(){
   // スプラッシュ画面でGASを事前起動してからログイン画面に遷移
   showS('s-splash');
