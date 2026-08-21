@@ -499,7 +499,7 @@ function gasCall(action,params,onSuccess,onError){
     <input id="task-inp-text" class="finp" type="text"
            placeholder="例）数学 過去問、英語 長文読解" maxlength="25"
            style="margin-bottom:12px"
-           onkeydown="if(event.key==='Enter')confirmTaskInput()">
+           onkeydown="if(event.key==='Enter')event.preventDefault()">
     <button class="btn-cta" onclick="confirmTaskInput()">追加する ✅</button>
     <button class="back-btn" style="margin-top:8px" onclick="cancelTaskInput()">キャンセル</button>
   </div>
@@ -999,6 +999,359 @@ var CONFIRM_TIMEOUT_MS=30*60*1000;   // 30分応答なしで一時退出
 //   実際は認証成功後のクラッシュだった）。
 function lsg(key){ return localStorage.getItem(key); }
 function lss(obj){ Object.keys(obj).forEach(function(k){ localStorage.setItem(k, obj[k]); }); }
+
+// ══════════════════════════════════════════════════════════════
+// ★ バグ修正：以下、コード中で呼び出されているのに定義が存在せず
+//   ReferenceErrorでクラッシュしていた関数群（24個）をまとめて追加。
+//   （HTMLエスケープ・toast通知・管理者画面・120分確認・Q&A・
+//    アクティビティカレンダー・スケジュール保存・メディアセッション等）
+// ══════════════════════════════════════════════════════════════
+
+// ── 共通：HTMLエスケープ・トースト通知・時間フォーマット ─────────
+function esc(str){
+  return String(str==null?'':str).replace(/[&<>"']/g,function(c){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+  });
+}
+var _toastTimer=null;
+function toast(msg){
+  var el=document.getElementById('toast');
+  if(!el)return;
+  el.textContent=msg;
+  el.classList.add('show');
+  if(_toastTimer)clearTimeout(_toastTimer);
+  _toastTimer=setTimeout(function(){el.classList.remove('show');},2600);
+}
+function fmt(totalSecs){
+  totalSecs=Math.max(0,Math.floor(totalSecs||0));
+  var h=Math.floor(totalSecs/3600);
+  var m=Math.floor((totalSecs%3600)/60);
+  var s=totalSecs%60;
+  return String(h).padStart(2,'0')+':'+String(m).padStart(2,'0')+':'+String(s).padStart(2,'0');
+}
+
+// ── 科目別ラップ内訳（勉強中タイマー下の表示） ────────────────
+function renderLapList(){
+  var el=document.getElementById('lap-list');
+  var summary=document.getElementById('lap-summary');
+  if(!el)return;
+  var bySubj={};
+  laps.forEach(function(l){ bySubj[l.subject]=(bySubj[l.subject]||0)+l.durationSecs; });
+  var curSecs=Math.max(0,getElapsedStudySecs()-studySecsAtLapStart);
+  bySubj[selSubj]=(bySubj[selSubj]||0)+curSecs;
+  var subjects=Object.keys(bySubj);
+  if(summary)summary.classList.toggle('hidden',subjects.length<=1);
+  el.innerHTML=subjects.map(function(s){
+    var m=Math.floor(bySubj[s]/60);
+    return '<div style="display:flex;justify-content:space-between;font-size:12px;color:var(--t1);padding:3px 0">'+
+      '<span>'+esc(s)+(s===selSubj?' <span style="color:var(--m)">●</span>':'')+'</span>'+
+      '<span style="font-weight:700">'+m+'分</span></div>';
+  }).join('');
+}
+
+// ── 在室中の生存確認ハートビート ──────────────────────────────
+function startHeartbeat(){
+  if(heartbeatIv)clearInterval(heartbeatIv);
+  var send=function(){
+    if(!U||!SESSION)return;
+    gasCall('updateHeartbeat',{studentCode:U.studentCode,sessionId:SESSION.sessionId,subject:selSubj},null,null);
+  };
+  send();
+  heartbeatIv=setInterval(send,60000);
+}
+
+// ── Media Session API（ロック画面へのタイマー表示・対応ブラウザのみ） ──
+function startMediaSession(){
+  try{
+    if(!('mediaSession' in navigator))return;
+    navigator.mediaSession.metadata=new MediaMetadata({title:'勉強中',artist:selSubj||'',album:'逆転アクセラルーム'});
+    navigator.mediaSession.playbackState='playing';
+  }catch(e){}
+}
+function updateMediaSession(timerStr){
+  try{
+    if(!('mediaSession' in navigator))return;
+    navigator.mediaSession.metadata=new MediaMetadata({title:timerStr+' 経過',artist:selSubj||'',album:'逆転アクセラルーム'});
+  }catch(e){}
+}
+function stopMediaSession(){
+  try{
+    if(!('mediaSession' in navigator))return;
+    navigator.mediaSession.playbackState='none';
+    navigator.mediaSession.metadata=null;
+  }catch(e){}
+}
+
+// ── 120分ごとの生存確認モーダル ───────────────────────────────
+function updateConfirmCountdown(){
+  var el=document.getElementById('confirm-countdown');
+  if(!el)return;
+  var m=Math.floor(Math.max(0,confirmSecsLeft)/60),s=Math.max(0,confirmSecsLeft)%60;
+  el.textContent=String(m).padStart(2,'0')+':'+String(s).padStart(2,'0');
+}
+function startConfirmTimer(){
+  if(confirmTimer)clearTimeout(confirmTimer);
+  if(confirmCountdownIv){clearInterval(confirmCountdownIv);confirmCountdownIv=null;}
+  confirmTimer=setTimeout(function(){
+    openModal('modal-confirm');
+    confirmSecsLeft=Math.floor(CONFIRM_TIMEOUT_MS/1000);
+    updateConfirmCountdown();
+    confirmCountdownIv=setInterval(function(){
+      confirmSecsLeft--;
+      updateConfirmCountdown();
+      if(confirmSecsLeft<=0){
+        clearInterval(confirmCountdownIv);confirmCountdownIv=null;
+        startTempPause();
+      }
+    },1000);
+  },CONFIRM_INTERVAL_MS);
+}
+function confirmStudying(){
+  closeModal('modal-confirm');
+  if(confirmCountdownIv){clearInterval(confirmCountdownIv);confirmCountdownIv=null;}
+  startConfirmTimer();
+  toast('確認ありがとうございます！引き続き頑張りましょう 💪');
+}
+function startTempPause(){
+  closeModal('modal-confirm');
+  if(confirmCountdownIv){clearInterval(confirmCountdownIv);confirmCountdownIv=null;}
+  if(inBrk)return;
+  inBrk=true;inTempPause=true;brkStart=new Date();
+  var stbdg=document.getElementById('stbdg');if(stbdg)stbdg.className='stbdg brk';
+  var sdot=document.getElementById('sdot');if(sdot)sdot.className='sdot brk';
+  var slbl=document.getElementById('slbl');if(slbl)slbl.textContent='☕ 一時退出中';
+  var tdisp=document.getElementById('tdisp');if(tdisp)tdisp.className='tdisp brk';
+  var pfillEl=document.getElementById('pfill');if(pfillEl)pfillEl.className='pfill brk';
+  if(biv)clearInterval(biv);
+  biv=setInterval(function(){
+    var brkSecs=brkStart?Math.floor((new Date()-brkStart)/1000):0;
+    var tlbl=document.getElementById('tlbl');if(tlbl)tlbl.textContent='☕ 一時退出中 '+fmt(brkSecs);
+  },1000);
+  updateBrkUI();
+  toast('しばらく応答がなかったため一時退出中にしました');
+}
+
+// ── 在室中Q&Aチャット ──────────────────────────────────────
+function loadQA(){
+  if(!U)return;
+  gasCall('getConsultations',{studentCode:U.studentCode},function(list){
+    renderQAList(list||[]);
+  },null);
+}
+function renderQAList(list){
+  var el=document.getElementById('qa-list');
+  if(!el)return;
+  if(!list.length){
+    el.innerHTML='<div style="text-align:center;color:var(--t2);padding:16px;font-size:12px">まだ質問がありません<br>下の入力欄からコーチに質問できます</div>';
+    _prevReplyCnt=0;
+    return;
+  }
+  var replyCount=list.filter(function(q){return q.reply;}).length;
+  if(_qaLoadCnt>0&&replyCount>_prevReplyCnt){
+    var badge=document.getElementById('qa-reply-badge');
+    if(badge)badge.classList.remove('hidden');
+  }
+  _prevReplyCnt=replyCount;
+  _qaLoadCnt++;
+  el.innerHTML=list.map(function(q){
+    var html='<div class="qa-thread">'+
+      '<div class="qa-th-meta">🙋 '+esc(q.time)+(q.status==='未読'?' <span style="color:var(--rd);font-weight:700">未対応</span>':'')+'</div>'+
+      '<div class="qa-th-q">'+esc(q.message)+'</div>';
+    if(q.reply){
+      html+='<div class="qa-th-div"></div><div class="qa-th-reply">👨‍🏫 '+esc(q.reply)+'</div>';
+    }else{
+      html+='<div class="qa-th-div"></div><div class="qa-th-wait">コーチからの返信をお待ちください…</div>';
+    }
+    return html+'</div>';
+  }).join('');
+}
+function postQA(){
+  var inp=document.getElementById('qa-inp');
+  var text=inp?inp.value.trim():'';
+  if(!text){toast('質問を入力してください');return;}
+  if(!U)return;
+  var btn=document.getElementById('qa-send-btn');
+  if(btn)btn.disabled=true;
+  gasCall('postConsultation',{studentCode:U.studentCode,message:text},function(res){
+    if(btn)btn.disabled=false;
+    if(res&&res.success){
+      inp.value='';
+      toast('質問を送信しました 📨');
+      loadQA();
+    }else{
+      toast('送信エラーが発生しました');
+    }
+  },function(){
+    if(btn)btn.disabled=false;
+    toast('接続エラーが発生しました');
+  });
+}
+function scrollToQA(){
+  clearQABadge();
+  var el=document.getElementById('qa-list');
+  if(el)el.scrollIntoView({behavior:'smooth',block:'center'});
+}
+function clearQABadge(){
+  var badge=document.getElementById('qa-reply-badge');
+  if(badge)badge.classList.add('hidden');
+}
+
+// ── ホーム画面の定期ポーリング・ログアウト後のライブ人数更新 ──────
+function startPoll(){
+  if(pollIv)clearInterval(pollIv);
+  pollIv=setInterval(function(){
+    if(!U)return;
+    gasCall('getLiveStats',{},function(r){
+      var el=document.getElementById('p-live');if(el)el.textContent=r.activeCount;
+    },null);
+  },30000);
+}
+function fetchLiveLogin(){
+  gasCall('getLiveStats',{},function(r){
+    var le=document.getElementById('l-live');if(le)le.textContent=r.activeCount;
+    var tu=document.getElementById('l-today-u');if(tu)tu.textContent=(r.todayUserCount||0)+'人';
+    var th=document.getElementById('l-today-h');if(th)th.textContent=Math.round((r.todayMins||0)/60*10)/10+'h';
+  },null);
+}
+
+// ── 学習アクティビティカレンダー（GitHub風ヒートマップ） ─────────
+var _calRangeDays=90;
+function loadActivityCalendar(){
+  if(!U)return;
+  gasCall('getActivityCalendar',{studentCode:U.studentCode,days:_calRangeDays},function(data){
+    renderActivityCalendar(data||[]);
+  },null);
+}
+function selCalRange(btn,days){
+  document.querySelectorAll('.rtab').forEach(function(b){b.classList.remove('on')});
+  if(btn)btn.classList.add('on');
+  _calRangeDays=days;
+  loadActivityCalendar();
+}
+function renderActivityCalendar(data){
+  var el=document.getElementById('cal-container');
+  if(!el)return;
+  if(!data.length){
+    el.innerHTML='<div style="font-size:11px;color:var(--t2);padding:8px">データがありません</div>';
+    return;
+  }
+  var first=new Date(data[0].date+'T00:00:00');
+  var startDow=isNaN(first.getTime())?0:first.getDay();
+  var cells=[];
+  for(var i=0;i<startDow;i++)cells.push(null);
+  data.forEach(function(d){cells.push(d);});
+  var html='<div style="display:grid;grid-auto-flow:column;grid-template-rows:repeat(7,11px);gap:2px">';
+  cells.forEach(function(d){
+    if(!d){html+='<div class="cal-cell" style="background:transparent;cursor:default"></div>';return;}
+    html+='<div class="cal-cell cal-l'+(d.level||0)+'" title="'+esc(d.date)+'（'+(d.hours||0)+'h）"></div>';
+  });
+  html+='</div>';
+  el.innerHTML=html;
+}
+
+// ── 初回ログイン時のスケジュール作成促進バナー ───────────────────
+function checkFirstLoginToday(){
+  var banner=document.getElementById('sched-warn-banner');
+  if(!banner)return;
+  var today=todayDateStr();
+  var hasSched=lsg('ara_sched_date')===today;
+  var dismissed=lsg('ara_sched_warn_dismiss')===today;
+  banner.classList.toggle('hidden',hasSched||dismissed);
+}
+function dismissSchedWarn(){
+  lss({ara_sched_warn_dismiss:todayDateStr()});
+  var banner=document.getElementById('sched-warn-banner');
+  if(banner)banner.classList.add('hidden');
+}
+
+// ── スケジュール保存・クリア ──────────────────────────────────
+function saveScheduleData(){
+  if(!U||!_schedCurrentDate)return;
+  var dateStr=_dateToStr(_schedCurrentDate);
+  var payload=schedBlocks.map(function(b){
+    return {id:b.id,start:slotToHHMM(b.startSlot),end:slotToHHMM(b.endSlot+1),task:b.task,color:b.color};
+  });
+  openModal('modal-saving');
+  gasCall('saveSchedule',{studentCode:U.studentCode,date:dateStr,schedule:JSON.stringify(payload)},function(res){
+    closeModal('modal-saving');
+    if(res&&res.success){
+      toast('スケジュールを保存しました ✅');
+      if(dateStr===todayDateStr()){
+        lss({ara_sched_date:todayDateStr()});
+        updateSchedBtn();
+        var wb=document.getElementById('sched-warn-banner');if(wb)wb.classList.add('hidden');
+      }
+      closeModal('modal-schedule');
+    }else{
+      toast('保存に失敗しました');
+    }
+  },function(){
+    closeModal('modal-saving');
+    toast('接続エラーが発生しました');
+  });
+}
+function clearSchedule(){
+  if(!confirm('この日のスケジュールをクリアしますか？（保存するまでは確定しません）'))return;
+  schedBlocks=[];
+  renderAllBlocks();
+}
+
+// ── 管理者ダッシュボード ──────────────────────────────────────
+function loadAdmin(){
+  gasCall('getLiveStats',{},function(r){
+    var a=document.getElementById('adm-a');if(a)a.textContent=(r.realActiveCount!=null?r.realActiveCount:r.activeCount);
+    var t=document.getElementById('adm-t');if(t)t.textContent=(r.realTodayUserCount!=null?r.realTodayUserCount:r.todayUserCount)+'人';
+    var h=document.getElementById('adm-h');if(h)h.textContent=Math.round((r.realTodayMins!=null?r.realTodayMins:r.todayMins)/60*10)/10+'h';
+  },null);
+  gasCall('getCoachStatus',{},function(s){renderAdminCoachCard(s);},function(){renderAdminCoachCard(null);});
+  gasCall('getAdminData',{},function(res){
+    renderAdminStudents(res&&res.students);
+    renderAdminQA(res&&res.consultations);
+  },function(){
+    var se=document.getElementById('adm-students');if(se)se.innerHTML='<div style="padding:14px;text-align:center;color:var(--rd);font-size:12px">読み込みに失敗しました</div>';
+    var qe=document.getElementById('adm-qa');if(qe)qe.innerHTML='<div style="padding:14px;text-align:center;color:var(--rd);font-size:12px">読み込みに失敗しました</div>';
+  });
+}
+function renderAdminStudents(students){
+  var el=document.getElementById('adm-students');
+  if(!el)return;
+  if(!students||!students.length){
+    el.innerHTML='<div style="padding:14px;text-align:center;color:var(--t2);font-size:12px">現在入室中の生徒はいません</div>';
+    return;
+  }
+  el.innerHTML=students.map(function(s){
+    return '<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid var(--bd);font-size:12px">'+
+      '<span style="font-weight:700;color:var(--t0)">'+esc(s.name)+'</span>'+
+      '<span style="color:var(--t2)">'+s.elapsedMins+'分経過・HB '+esc(s.lastHB)+'</span>'+
+      '</div>';
+  }).join('');
+}
+function renderAdminQA(consultations){
+  var el=document.getElementById('adm-qa');
+  if(!el)return;
+  if(!consultations||!consultations.length){
+    el.innerHTML='<div style="padding:14px;text-align:center;color:var(--t2);font-size:12px">質問はありません</div>';
+    return;
+  }
+  el.innerHTML=consultations.map(function(c){
+    var statusBadge=c.status==='未読'
+      ?'<span style="background:#FEE2E2;color:#C52B2B;border-radius:8px;padding:2px 8px;font-size:10px;font-weight:700">未読</span>'
+      :'<span style="background:#DCFCE7;color:#166534;border-radius:8px;padding:2px 8px;font-size:10px;font-weight:700">返信済</span>';
+    return '<div style="padding:12px 14px;border-bottom:1px solid var(--bd)">'+
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">'+
+        '<span style="font-weight:700;font-size:12px;color:var(--t0)">'+esc(c.name)+'</span>'+
+        statusBadge+
+      '</div>'+
+      '<div style="font-size:11px;color:var(--t2);margin-bottom:6px">'+esc(c.time)+'</div>'+
+      '<div style="font-size:13px;color:var(--t0);margin-bottom:8px;white-space:pre-line">'+esc(c.message)+'</div>'+
+      (c.reply?'<div style="font-size:12px;color:var(--m);background:var(--lb);border-radius:8px;padding:8px;margin-bottom:6px;white-space:pre-line">💬 '+esc(c.reply)+'</div>':'')+
+      '<div style="display:flex;gap:6px">'+
+        '<input id="ri-'+c.row+'" class="finp" type="text" placeholder="返信を入力..." value="'+esc(c.reply||'')+'" style="flex:1;padding:7px 10px;font-size:12px">'+
+        '<button onclick="submitReply('+c.row+',\''+esc(c.code)+'\',this)" style="background:var(--m);color:#fff;border:none;border-radius:8px;padding:7px 14px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap">送信</button>'+
+      '</div>'+
+    '</div>';
+  }).join('');
+}
 
 window.addEventListener('load',function(){
   // スプラッシュ画面でGASを事前起動してからログイン画面に遷移
