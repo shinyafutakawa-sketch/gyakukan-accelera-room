@@ -1143,6 +1143,22 @@ function resetOtherSubject(){
 // ══════════════════════════════════════════════════════════════
 //  生徒ログイン・ログアウト
 // ══════════════════════════════════════════════════════════════
+// ★ バグ修正：login()内でshowErr()/clearErr()が呼ばれているが定義が
+//   存在せず、ボタン押下時に ReferenceError が発生して処理が
+//   最初の行（clearErr()）で止まっていた（入室ボタンが反応しない原因）。
+//   #login-err（.err-msg）にエラーメッセージを出し入れする実装を追加。
+function showErr(msg){
+  var el=document.getElementById('login-err');
+  if(!el)return;
+  el.textContent=msg;
+  el.style.display='block';
+}
+function clearErr(){
+  var el=document.getElementById('login-err');
+  if(!el)return;
+  el.textContent='';
+  el.style.display='none';
+}
 function login(){
   var code=document.getElementById('ci').value.trim();
   var name=document.getElementById('li-name').value.trim();
