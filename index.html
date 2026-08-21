@@ -1,719 +1,1525 @@
-<!DOCTYPE html>
-<html lang="ja">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>逆転アクセラルーム</title>
-<style>
-:root {
-  --main:#207B97;--sub:#33A6C4;--light:#B7DDED;--lb:#EBF6FA;
-  --dk:#104854;--cta:#F3A12C;
-  --w:#FFFFFF;--g0:#F0F5F8;--g1:#E0ECF1;--g3:#9DBAC6;
-  --t0:#0D2B35;--t1:#3A5E6C;--t2:#7A96A1;
-  --green:#22C55E;
+// ============================================================
+//  逆転アクセラルーム - GAS バックエンド v5.1
+//  変更点:
+//    - 生徒マスターにA列「ステータス」が追加
+//    - 生徒コード: B列(index 1)、氏名: C列(index 2)、週間目標: D列(index 3)
+//    - 退塾済・卒塾済・入塾前離脱済・体験終了後離脱 はログイン不可
+// ============================================================
+
+// ── Google Chat 通知設定 ────────────────────────────────────────
+// コーチチェックイン通知用 Webhook（Q&A通知とは別トークン）
+const COACH_CHECKIN_WEBHOOK = 'https://chat.googleapis.com/v1/spaces/AAQA1Y6MMYo/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=X6kS8OXwXQddCtBqnqfGm7BnCobwHUuD0ONQrjajB1c';
+
+const GOOGLE_CHAT_WEBHOOK = 'https://chat.googleapis.com/v1/spaces/AAQA1Y6MMYo/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=4BNRN6W_yw3rK3ym4qkz1wEAxMeOBPtdbAXSot6JAuM';
+
+const SHEET_STUDENTS  = '生徒マスター';
+const SHEET_STUDY     = '勉強記録';
+const SHEET_LOGIN     = 'ログイン記録';
+const SHEET_ACTIVE    = 'アクティブセッション';
+const SHEET_CONSULT   = '相談記録';
+const SHEET_REPORT    = '学習報告';
+const SHEET_RATING    = '評価記録';
+const SHEET_SCHEDULE  = 'スケジュール';
+
+// ── ログインを拒否するステータス ──────────────────────────────
+const BLOCKED_STATUSES = ['退塾済', '卒塾済', '入塾前離脱済', '体験終了後離脱'];
+
+
+// ══════════════════════════════════════════════════════════════
+//  コーチチェックイン機能
+//  状態は ScriptProperties に保存（シート不要・高速）
+// ══════════════════════════════════════════════════════════════
+
+function coachCheckIn(checkoutTime) {
+  try {
+    var props = PropertiesService.getScriptProperties();
+    var now = new Date();
+    var today = jstDate(now);
+    var checkinHHMM = Utilities.formatDate(now, 'Asia/Tokyo', 'HH:mm');
+
+    props.setProperties({
+      COACH_STATUS:       'in',
+      COACH_DATE:         today,
+      COACH_CHECKIN_TIME: checkinHHMM,
+      COACH_CHECKOUT:     checkoutTime || ''
+    });
+
+    // Google Chat 通知
+    var msg = '🏫 *コーチがチェックインしました*\n\n' +
+      '🕐 チェックイン: ' + checkinHHMM + '\n' +
+      '🕕 チェックアウト予定: ' + (checkoutTime || '未設定') + '\n\n' +
+      '本日もよろしくお願いします！ 質問がある生徒はお気軽にどうぞ 📚';
+
+    UrlFetchApp.fetch(COACH_CHECKIN_WEBHOOK, {
+      method: 'post', contentType: 'application/json',
+      payload: JSON.stringify({ text: msg }), muteHttpExceptions: true
+    });
+
+    return { success: true, checkinTime: checkinHHMM, checkoutTime: checkoutTime };
+  } catch(e) { return { success: false, message: e.message }; }
 }
-*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
-body{font-family:-apple-system,'Hiragino Sans','Yu Gothic UI','Meiryo',sans-serif;background:var(--g0);color:var(--t0);min-height:100vh;font-size:14px;line-height:1.5}
-button{font-family:inherit;cursor:pointer;border:none;outline:none}
-input,textarea{font-family:inherit;outline:none;border:none}
-.hidden{display:none!important}
-.screen{min-height:100vh;display:flex;flex-direction:column}
-.hdr{background:var(--dk);padding:12px 16px;display:flex;align-items:center;justify-content:space-between;gap:8px;position:sticky;top:0;z-index:100}
-.hdr-logo{display:flex;align-items:center;gap:8px}
-.hdr-icon{width:28px;height:28px;border-radius:7px;background:var(--cta);display:flex;align-items:center;justify-content:center;font-weight:900;font-size:14px;color:var(--dk);flex-shrink:0}
-.hdr-title{color:var(--w);font-weight:800;font-size:15px;letter-spacing:.02em}
-.hdr-sub{color:var(--light);font-size:10px}
-.hdr-right{display:flex;align-items:center;gap:8px;flex-shrink:0}
-.live-badge{background:rgba(34,197,94,.15);border:1px solid rgba(34,197,94,.35);border-radius:20px;padding:4px 10px;display:flex;align-items:center;gap:5px}
-.live-dot{width:6px;height:6px;border-radius:50%;background:var(--green);animation:pulse 2s ease-in-out infinite}
-@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(34,197,94,.4)}50%{box-shadow:0 0 0 5px rgba(34,197,94,0)}}
-.live-num{color:var(--w);font-weight:800;font-size:14px}
-.live-lbl{color:rgba(255,255,255,.6);font-size:11px}
-.btn-logout{background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);color:rgba(255,255,255,.8);padding:5px 12px;border-radius:20px;font-size:11px;font-weight:600}
-#screen-login{background:var(--dk);justify-content:center;align-items:center;padding:24px 20px}
-.login-card{background:var(--w);border-radius:24px;padding:32px 24px;width:100%;max-width:400px;box-shadow:0 20px 60px rgba(0,0,0,.25)}
-.login-logo{text-align:center;margin-bottom:28px}
-.login-logo .icon{width:64px;height:64px;border-radius:18px;background:var(--cta);display:flex;align-items:center;justify-content:center;font-weight:900;font-size:30px;color:var(--dk);margin:0 auto 12px}
-.login-logo h1{font-size:20px;font-weight:900;color:var(--dk);margin-bottom:4px}
-.login-logo p{font-size:12px;color:var(--t2)}
-.login-live{background:var(--dk);border-radius:14px;padding:14px;text-align:center;margin-bottom:24px}
-.login-live-n{font-size:40px;font-weight:900;color:var(--w);line-height:1}
-.login-live-lbl{font-size:11px;color:var(--light);margin-top:4px}
-.login-input-wrap{margin-bottom:16px}
-.input-lbl{font-size:11px;color:var(--t2);font-weight:600;margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em}
-.code-input{width:100%;padding:14px 16px;border-radius:12px;border:2px solid var(--g1);font-size:18px;font-weight:700;letter-spacing:.1em;color:var(--t0);background:var(--g0);text-align:center;transition:border-color .2s}
-.code-input:focus{border-color:var(--main)}
-.btn-login{width:100%;padding:16px;border-radius:14px;background:var(--cta);color:var(--dk);font-weight:900;font-size:17px;box-shadow:0 4px 16px rgba(243,161,44,.4);transition:all .2s;margin-bottom:12px}
-.btn-login:active{transform:scale(.97);opacity:.9}
-.login-note{text-align:center;font-size:12px;color:var(--t2)}
-.login-tagline{text-align:center;font-size:13px;font-weight:700;color:var(--main);margin-top:20px;padding-top:20px;border-top:1px solid var(--g1)}
-.err-msg{background:#FEE2E2;color:#C52B2B;border-radius:10px;padding:10px 14px;font-size:13px;margin-bottom:12px;display:none}
-#screen-dash{background:var(--g0)}
-.dash-body{padding:12px;display:flex;flex-direction:column;gap:10px;max-width:520px;margin:0 auto}
-.card{background:var(--w);border-radius:16px;padding:16px;border:1px solid var(--g1)}
-.card-title{font-size:10px;color:var(--t2);font-weight:700;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px}
-.timer-card{background:var(--w);border-radius:16px;padding:20px 16px;border:1px solid var(--g1)}
-.subj-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px}
-.subj-chip{padding:6px 12px;border-radius:20px;border:1.5px solid var(--g1);background:var(--g0);font-size:12px;color:var(--t1);font-weight:600;transition:all .15s}
-.subj-chip.active{background:var(--lb);border-color:var(--light);color:var(--main)}
-.timer-display{font-size:52px;font-weight:900;text-align:center;letter-spacing:.04em;font-variant-numeric:tabular-nums;line-height:1;margin:8px 0 6px;transition:color .3s}
-.timer-active{color:var(--main)}
-.timer-idle{color:var(--g3)}
-.timer-sub{text-align:center;font-size:12px;color:var(--t2);margin-bottom:14px;min-height:18px}
-.btn-enter{width:100%;padding:16px;border-radius:14px;background:var(--cta);color:var(--dk);font-weight:900;font-size:17px;box-shadow:0 4px 16px rgba(243,161,44,.35);transition:all .2s}
-.btn-enter:active{transform:scale(.97)}
-.btn-exit{width:100%;padding:16px;border-radius:14px;background:#FEE2E2;color:#C52B2B;font-weight:900;font-size:17px;transition:all .2s}
-.entry-status{background:var(--lb);border-radius:10px;padding:8px 12px;display:flex;align-items:center;gap:6px;margin-bottom:10px;font-size:12px;color:var(--main);font-weight:600}
-.entry-dot{width:7px;height:7px;border-radius:50%;background:var(--green);animation:pulse 2s infinite}
-.progress-card{}
-.prog-top{display:flex;align-items:center;gap:16px;margin-bottom:14px}
-.ring-wrap{position:relative;flex-shrink:0}
-.ring-svg{transform:rotate(-90deg)}
-.ring-bg{fill:none;stroke:var(--g1);stroke-width:8}
-.ring-fill{fill:none;stroke:var(--cta);stroke-width:8;stroke-linecap:round;transition:stroke-dashoffset .8s ease}
-.ring-center{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
-.ring-pct{font-size:20px;font-weight:900;color:var(--t0)}
-.ring-pct-lbl{font-size:9px;color:var(--t2)}
-.prog-info{flex:1}
-.prog-nums{font-size:22px;font-weight:900;color:var(--t0)}
-.prog-nums span{font-size:13px;color:var(--t2);font-weight:400}
-.prog-remain{font-size:13px;color:var(--main);font-weight:600;margin-top:4px}
-.prog-remain.done{color:var(--green)}
-.prog-goal-btn{font-size:11px;color:var(--t2);background:none;border:1px solid var(--g1);border-radius:20px;padding:3px 10px;margin-top:6px}
-.week-bars{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
-.day-col{display:flex;flex-direction:column;align-items:center;gap:3px}
-.bar-wrap{height:48px;display:flex;align-items:flex-end;width:100%}
-.bar{width:100%;border-radius:4px 4px 0 0;background:var(--light);min-height:3px;transition:height .5s ease}
-.bar.today-bar{background:var(--main)}
-.bar.empty-bar{background:var(--g1)}
-.day-lbl{font-size:10px;color:var(--t2);font-weight:600}
-.day-lbl.today-lbl{color:var(--main);font-weight:800}
-.day-mins{font-size:9px;color:var(--t2)}
-.streak-card{}
-.streak-top{display:flex;align-items:center;gap:12px;margin-bottom:12px}
-.streak-num{font-size:42px;font-weight:900;color:var(--cta);line-height:1}
-.streak-unit{font-size:16px;font-weight:700;color:var(--t0)}
-.streak-level{display:inline-flex;align-items:center;gap:5px;background:var(--lb);color:var(--main);border-radius:20px;padding:4px 12px;font-size:12px;font-weight:700;margin-top:4px}
-.streak-dots{display:flex;gap:6px;flex-wrap:wrap}
-.s-dot{width:28px;height:28px;border-radius:50%;background:var(--g1);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--t2)}
-.s-dot.done{background:var(--green);color:var(--w)}
-.s-dot.today{background:var(--main);color:var(--w);box-shadow:0 0 0 3px rgba(32,123,151,.25)}
-.stats-row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-.stat-mini{background:var(--w);border-radius:14px;padding:14px;border:1px solid var(--g1)}
-.stat-mini-n{font-size:26px;font-weight:900;color:var(--main)}
-.stat-mini-lbl{font-size:11px;color:var(--t2);margin-top:2px}
-.feed-card{}
-.feed-post{display:flex;gap:10px;padding:6px 0;border-bottom:1px solid var(--g1)}
-.feed-post:last-child{border-bottom:none;padding-bottom:0}
-.feed-av{width:32px;height:32px;border-radius:50%;background:var(--sub);display:flex;align-items:center;justify-content:center;color:var(--w);font-weight:800;font-size:12px;flex-shrink:0}
-.feed-body{flex:1;min-width:0}
-.feed-meta{font-size:11px;color:var(--t2);margin-bottom:2px}
-.feed-msg{font-size:13px;color:var(--t0);word-break:break-all}
-.action-row{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding-bottom:16px}
-.btn-action{padding:14px 8px;border-radius:14px;border:1.5px solid var(--g1);background:var(--w);color:var(--main);font-size:13px;font-weight:700;display:flex;flex-direction:column;align-items:center;gap:4px}
-.btn-action-icon{font-size:22px}
-.btn-consult{border-color:var(--light);background:var(--lb)}
-.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:flex-end;justify-content:center;z-index:200;opacity:0;pointer-events:none;transition:opacity .25s}
-.modal-overlay.open{opacity:1;pointer-events:all}
-.modal-box{background:var(--w);border-radius:24px 24px 0 0;padding:24px 20px 36px;width:100%;max-width:520px;transform:translateY(100%);transition:transform .3s ease}
-.modal-overlay.open .modal-box{transform:translateY(0)}
-.modal-title{font-size:17px;font-weight:800;color:var(--t0);margin-bottom:4px}
-.modal-sub{font-size:12px;color:var(--t2);margin-bottom:16px}
-.modal-input{width:100%;padding:12px 14px;border-radius:12px;border:2px solid var(--g1);font-size:14px;color:var(--t0);background:var(--g0);resize:none;transition:border-color .2s}
-.modal-input:focus{border-color:var(--main)}
-.modal-btns{display:flex;gap:8px;margin-top:14px}
-.btn-cancel{flex:1;padding:13px;border-radius:12px;border:1.5px solid var(--g1);background:none;color:var(--t1);font-size:14px;font-weight:700}
-.btn-submit{flex:2;padding:13px;border-radius:12px;background:var(--cta);color:var(--dk);font-size:14px;font-weight:900;box-shadow:0 3px 10px rgba(243,161,44,.3)}
-.modal-range-wrap{margin:10px 0}
-.modal-range{width:100%;height:6px;appearance:none;background:var(--g1);border-radius:3px;outline:none}
-.modal-range::-webkit-slider-thumb{appearance:none;width:22px;height:22px;border-radius:50%;background:var(--cta);box-shadow:0 2px 6px rgba(243,161,44,.4)}
-.range-val{text-align:center;font-size:28px;font-weight:900;color:var(--main);margin:8px 0}
-.range-unit{font-size:14px;color:var(--t2)}
-.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(80px);background:var(--dk);color:var(--w);padding:12px 24px;border-radius:40px;font-size:13px;font-weight:700;z-index:300;opacity:0;transition:all .35s ease;white-space:nowrap;pointer-events:none}
-.toast.show{transform:translateX(-50%) translateY(0);opacity:1}
-.loading-overlay{position:fixed;inset:0;background:rgba(16,72,84,.7);display:flex;align-items:center;justify-content:center;z-index:400}
-.spinner{width:48px;height:48px;border:4px solid rgba(255,255,255,.2);border-top-color:var(--cta);border-radius:50%;animation:spin 1s linear infinite}
-@keyframes spin{to{transform:rotate(360deg)}}
-</style>
-</head>
-<body>
 
-<div id="screen-login" class="screen">
-  <div class="login-card">
-    <div class="login-logo">
-      <div class="icon">🎯</div>
-      <h1>逆転アクセラルーム</h1>
-      <p>大学受験オンライン自習室</p>
-    </div>
-    <div class="login-live">
-      <div style="font-size:10px;color:var(--light);letter-spacing:.1em;text-transform:uppercase;margin-bottom:6px;display:flex;align-items:center;justify-content:center;gap:5px">
-        <div class="live-dot"></div>LIVE 今勉強中
-      </div>
-      <div class="login-live-n" id="login-live-num">—</div>
-      <div class="login-live-lbl">人が頑張っています</div>
-    </div>
-    <div class="login-input-wrap">
-      <div class="input-lbl">生徒コード</div>
-      <input id="code-input" class="code-input" type="text" placeholder="例）ST2024001" autocomplete="off" autocapitalize="characters">
-    </div>
-    <div id="login-err" class="err-msg"></div>
-    <button class="btn-login" onclick="login()">入室する →</button>
-    <div class="login-note">生徒コードは塾からお知らせしています</div>
-    <div class="login-tagline">今日も逆転しよう 💪</div>
-  </div>
-</div>
+function coachCheckOut() {
+  try {
+    var props = PropertiesService.getScriptProperties();
+    var now = new Date();
+    var checkoutHHMM = Utilities.formatDate(now, 'Asia/Tokyo', 'HH:mm');
+    var checkinTime  = props.getProperty('COACH_CHECKIN_TIME') || '—';
 
-<div id="screen-dash" class="screen hidden">
-  <div class="hdr">
-    <div class="hdr-logo">
-      <div class="hdr-icon">🎯</div>
-      <div>
-        <div class="hdr-title">逆転アクセラルーム</div>
-        <div id="hdr-name" class="hdr-sub">—</div>
-      </div>
-    </div>
-    <div class="hdr-right">
-      <div class="live-badge">
-        <div class="live-dot"></div>
-        <span class="live-num" id="hdr-live-num">—</span>
-        <span class="live-lbl">人</span>
-      </div>
-      <button class="btn-logout" onclick="confirmLogout()">退出</button>
-    </div>
-  </div>
+    props.setProperty('COACH_STATUS', 'out');
 
-  <div class="dash-body">
-    <div class="timer-card">
-      <div class="card-title">学習タイマー</div>
-      <div id="subj-chips" class="subj-chips">
-        <button class="subj-chip active" onclick="selSubj(this)">数学</button>
-        <button class="subj-chip" onclick="selSubj(this)">英語</button>
-        <button class="subj-chip" onclick="selSubj(this)">現代文</button>
-        <button class="subj-chip" onclick="selSubj(this)">古文</button>
-        <button class="subj-chip" onclick="selSubj(this)">理科</button>
-        <button class="subj-chip" onclick="selSubj(this)">社会</button>
-        <button class="subj-chip" onclick="selSubj(this)">その他</button>
-      </div>
-      <div id="timer-disp" class="timer-display timer-idle">00:00:00</div>
-      <div id="timer-sub" class="timer-sub">科目を選んで入室しましょう</div>
-      <div id="entry-status" class="entry-status hidden">
-        <div class="entry-dot"></div>
-        <span id="entry-subj-lbl">勉強中</span>
-      </div>
-      <button id="btn-main-action" class="btn-enter" onclick="toggleSession()">入室する →</button>
-    </div>
+    var msg = '👋 *コーチがチェックアウトしました*\n\n' +
+      '🕐 チェックイン: ' + checkinTime + '\n' +
+      '🕔 チェックアウト: ' + checkoutHHMM + '\n\n' +
+      'お疲れさまでした！ また次回よろしくお願いします。';
 
-    <div class="stats-row">
-      <div class="stat-mini">
-        <div class="stat-mini-n" id="stat-today">0<span style="font-size:16px">分</span></div>
-        <div class="stat-mini-lbl">今日の勉強時間</div>
-      </div>
-      <div class="stat-mini">
-        <div class="stat-mini-n" id="stat-total">0<span style="font-size:14px">h</span></div>
-        <div class="stat-mini-lbl">累計勉強時間</div>
-      </div>
-    </div>
+    UrlFetchApp.fetch(COACH_CHECKIN_WEBHOOK, {
+      method: 'post', contentType: 'application/json',
+      payload: JSON.stringify({ text: msg }), muteHttpExceptions: true
+    });
 
-    <div class="card progress-card">
-      <div class="card-title">今週の学習</div>
-      <div class="prog-top">
-        <div class="ring-wrap">
-          <svg class="ring-svg" width="88" height="88" viewBox="0 0 88 88">
-            <circle class="ring-bg" cx="44" cy="44" r="36"/>
-            <circle class="ring-fill" id="ring-fill" cx="44" cy="44" r="36"
-              stroke-dasharray="226.2" stroke-dashoffset="226.2"/>
-          </svg>
-          <div class="ring-center">
-            <div class="ring-pct" id="ring-pct">0%</div>
-            <div class="ring-pct-lbl">達成</div>
-          </div>
-        </div>
-        <div class="prog-info">
-          <div class="prog-nums"><span id="prog-cur">0</span>h <span>/ </span><span id="prog-goal">10</span>h</div>
-          <div class="prog-remain" id="prog-remain">あと — h で目標達成！</div>
-          <button class="prog-goal-btn" onclick="openGoalModal()">目標を変更</button>
-        </div>
-      </div>
-      <div class="week-bars" id="week-bars"></div>
-    </div>
+    return { success: true };
+  } catch(e) { return { success: false, message: e.message }; }
+}
 
-    <div class="card streak-card">
-      <div class="card-title">連続勉強記録</div>
-      <div class="streak-top">
-        <div>
-          <div class="streak-num" id="streak-num">0</div>
-          <div class="streak-unit">日連続</div>
-        </div>
-        <div>
-          <div style="font-size:11px;color:var(--t2)">現在のレベル</div>
-          <div class="streak-level" id="streak-level">🌱 スタート</div>
-        </div>
-      </div>
-      <div class="streak-dots" id="streak-dots"></div>
-    </div>
+// 生徒側から 2分ごとにポーリングされる（Q&A受付可否の判定用）
+function getCoachStatus() {
+  try {
+    var props     = PropertiesService.getScriptProperties();
+    var status    = props.getProperty('COACH_STATUS')       || 'out';
+    var coDate    = props.getProperty('COACH_DATE')          || '';
+    var coTime    = props.getProperty('COACH_CHECKOUT')      || '';
+    var ciTime    = props.getProperty('COACH_CHECKIN_TIME')  || '';
+    var today     = jstDate(new Date());
 
-    <div class="card feed-card">
-      <div class="card-title">みんなの学習報告</div>
-      <div id="feed-list"><div style="text-align:center;color:var(--t2);padding:16px;font-size:13px">読み込み中...</div></div>
-    </div>
+    // 日付が変わったら自動リセット（翌日も in のまま残らないよう）
+    if (coDate !== today) status = 'out';
 
-    <div class="action-row">
-      <button class="btn-action" onclick="openReportModal()">
-        <span class="btn-action-icon">📝</span><span>学習報告する</span>
-      </button>
-      <button class="btn-action btn-consult" onclick="openConsultModal()">
-        <span class="btn-action-icon">💬</span><span>コーチに相談</span>
-      </button>
-    </div>
-  </div>
-</div>
+    var isIn              = (status === 'in');
+    var qaDisabled        = false;
+    var minsUntilCheckout = 9999;
 
-<div class="modal-overlay" id="modal-report" onclick="closeModal('modal-report')">
-  <div class="modal-box" onclick="event.stopPropagation()">
-    <div class="modal-title">📝 学習報告</div>
-    <div class="modal-sub">今日の学習内容や目標を一言報告しましょう！</div>
-    <textarea id="report-input" class="modal-input" rows="3" placeholder="例）数学の微積分を3時間やります！"></textarea>
-    <div class="modal-btns">
-      <button class="btn-cancel" onclick="closeModal('modal-report')">キャンセル</button>
-      <button class="btn-submit" onclick="submitReport()">投稿する</button>
-    </div>
-  </div>
-</div>
+    if (isIn && coTime) {
+      var nowJST  = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'HH:mm');
+      var nowMins = parseInt(nowJST.split(':')[0]) * 60 + parseInt(nowJST.split(':')[1]);
+      var coMins  = parseInt(coTime.split(':')[0])  * 60 + parseInt(coTime.split(':')[1]);
+      minsUntilCheckout = coMins - nowMins;
 
-<div class="modal-overlay" id="modal-consult" onclick="closeModal('modal-consult')">
-  <div class="modal-box" onclick="event.stopPropagation()">
-    <div class="modal-title">💬 コーチに相談</div>
-    <div class="modal-sub">勉強の悩みや質問をコーチに送ります。後ほど確認・返信します。</div>
-    <textarea id="consult-input" class="modal-input" rows="4" placeholder="例）英語の長文読解でいつも時間が足りません..."></textarea>
-    <div class="modal-btns">
-      <button class="btn-cancel" onclick="closeModal('modal-consult')">キャンセル</button>
-      <button class="btn-submit" onclick="submitConsult()">送信する</button>
-    </div>
-  </div>
-</div>
+      // チェックアウト予定の 15分前から Q&A 受付停止
+      if (minsUntilCheckout <= 15)  qaDisabled = true;
+      // 5分超過したら自動チェックアウト扱い
+      if (minsUntilCheckout < -5) { isIn = false; qaDisabled = true; }
+    }
 
-<div class="modal-overlay" id="modal-goal" onclick="closeModal('modal-goal')">
-  <div class="modal-box" onclick="event.stopPropagation()">
-    <div class="modal-title">🎯 週間目標を設定</div>
-    <div class="modal-sub">今週の学習目標時間を設定します</div>
-    <div class="range-val"><span id="goal-val">10</span><span class="range-unit"> 時間 / 週</span></div>
-    <div class="modal-range-wrap">
-      <input id="goal-range" class="modal-range" type="range" min="1" max="40" value="10"
-        oninput="document.getElementById('goal-val').textContent=this.value">
-    </div>
-    <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--t2);margin-top:2px"><span>1時間</span><span>40時間</span></div>
-    <div class="modal-btns" style="margin-top:20px">
-      <button class="btn-cancel" onclick="closeModal('modal-goal')">キャンセル</button>
-      <button class="btn-submit" onclick="submitGoal()">設定する</button>
-    </div>
-  </div>
-</div>
+    return {
+      isIn:              isIn,
+      checkinTime:       ciTime,
+      checkoutTime:      coTime,
+      qaDisabled:        qaDisabled,
+      minsUntilCheckout: minsUntilCheckout
+    };
+  } catch(e) {
+    return { isIn: false, checkinTime: '', checkoutTime: '', qaDisabled: false, minsUntilCheckout: 9999 };
+  }
+}
 
-<div class="toast" id="toast"></div>
-<div class="loading-overlay hidden" id="loading"><div class="spinner"></div></div>
 
-<script>
-// ════════════════════════════════════════════════
-//  STATE
-// ════════════════════════════════════════════════
-var U               = null;
-var SESSION         = null;
-var PREV_TODAY_MINS = 0;
-var TIMER_IV        = null;
-var POLL_IV         = null;
-var DASH_DATA       = null;
-var SELECTED_SUBJ   = '数学';
+// ══════════════════════════════════════════════════════════════
+//  さくら（Bot在席）機能
+//  実ユーザー数 + Bot数 = 8〜12人を目標に表示
+//  ※ KPI集計・管理者画面は実ユーザー数のみ使用
+// ══════════════════════════════════════════════════════════════
 
-// ════════════════════════════════════════════════
-//  API HELPER — GAS へのリクエストを /api/gas 経由で送る
-//  google.script.run の代替
-// ════════════════════════════════════════════════
-function gasCall(action, params, onSuccess, onError) {
-  var body = Object.assign({ action: action }, params || {});
-  fetch('/api/gas', {
-    method:  'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify(body)
-  })
-  .then(function(r) {
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    return r.json();
-  })
-  .then(function(data) { if (onSuccess) onSuccess(data); })
-  .catch(function(err) {
-    console.error('[gasCall/' + action + ']', err);
-    if (onError) onError(err);
+var _BOT_NAMES    = [
+  // イニシャル系
+  'K.Y','T.K','S.H','R.K','M.S','A.T','D.K','Y.T','N.K','H.S','J.T','K.M',
+  // 短いニックネーム系
+  'たけ','みな','ゆき','まお','こう','ひろ','のあ','ゆし','りお','なつ','そら','はる','いと','れな','ゆめ',
+  // 1文字系
+  'し','つ','け','む','ひ','ぬ','わ','も','ぽ',
+  // 絵文字系
+  '🔥','⚡','🌸','🎯','💎','🦊','🐼','🍀','🌟','🏆'
+];
+var _BOT_SUBJECTS = ['数学ⅠA','数学ⅡB','英語','現代文','古文','日本史','化学','物理','地理','化学基礎'];
+var _BOT_TARGET_MIN = 8;
+var _BOT_TARGET_MAX = 12;
+
+function _botPRNG(seed) {
+  var s = ((seed % 2147483647) + 2147483647) % 2147483647 || 1;
+  return function() { s = (s * 16807) % 2147483647; return (s - 1) / 2147483646; };
+}
+
+// Bot参加者リストを生成（10分ごとに安定、経過時間は自然に増加）
+// ※ 1つのPRNGを順番に使うことで全員が異なる名前・科目になる
+function _generateBotParticipants(count) {
+  if (count <= 0) return [];
+  var now         = new Date();
+  var period      = Math.floor(now.getTime() / (10 * 60 * 1000));
+  var secInPeriod = Math.floor((now.getTime() % (10 * 60 * 1000)) / 1000);
+
+  // 1つのマスターPRNGから連続して乱数を取得（全員異なる値になる）
+  var r = _botPRNG(period * 31337);
+  // ウォームアップ（シードの偏りを解消）
+  for (var w = 0; w < 8; w++) r();
+
+  var usedNames = {}; // 名前の重複を防ぐ
+  var bots = [];
+
+  for (var i = 0; i < count; i++) {
+    // 未使用の名前を選ぶ（重複なし）
+    var nameIdx, tries = 0;
+    do {
+      nameIdx = Math.floor(r() * _BOT_NAMES.length);
+      tries++;
+    } while (usedNames[nameIdx] && tries < 20);
+    usedNames[nameIdx] = true;
+
+    var subjIdx  = Math.floor(r() * _BOT_SUBJECTS.length);
+    var baseMins     = Math.floor(r() * 135 + 15); // 15〜150分
+    var botSecOffset = Math.floor(r() * 60);           // Bot毎に異なる秒オフセット
+    var totalSec     = baseMins * 60 + botSecOffset + secInPeriod;
+
+    bots.push({
+      nick:    _BOT_NAMES[nameIdx],
+      subject: _BOT_SUBJECTS[subjIdx],
+      mins:    Math.floor(totalSec / 60),
+      secs:    totalSec % 60,
+      isBot:   true
+    });
+  }
+  return bots;
+}
+
+// 表示用の目標人数（時間帯で変動・深夜は2〜3人をキープ）
+function _getBotTargetCount() {
+  var now     = new Date();
+  var hourJST = Number(Utilities.formatDate(now, 'Asia/Tokyo', 'H'));
+  var minJST  = Number(Utilities.formatDate(now, 'Asia/Tokyo', 'm'));
+
+  var NIGHT_MIN = 2, NIGHT_MAX = 3;  // 深夜帯
+  var DAY_MIN   = _BOT_TARGET_MIN;   // 通常帯（8）
+  var DAY_MAX   = _BOT_TARGET_MAX;   // 通常帯（12）
+
+  var tMin, tMax;
+
+  if (hourJST >= 8 && hourJST <= 22) {
+    // 通常運転: 8〜12人
+    tMin = DAY_MIN; tMax = DAY_MAX;
+
+  } else if (hourJST === 23) {
+    // 23時台: 徐々に減少（23:00 → 12人 / 23:59 → 2〜3人）
+    var p = minJST / 60;
+    tMin = Math.round(DAY_MIN   + (NIGHT_MIN - DAY_MIN)   * p);
+    tMax = Math.round(DAY_MAX   + (NIGHT_MAX - DAY_MAX)   * p);
+
+  } else if (hourJST >= 0 && hourJST <= 6) {
+    // 深夜〜早朝: 2〜3人をキープ
+    tMin = NIGHT_MIN; tMax = NIGHT_MAX;
+
+  } else if (hourJST === 7) {
+    // 7時台: 徐々に増加（7:00 → 2〜3人 / 7:59 → 8〜12人）
+    var p = minJST / 60;
+    tMin = Math.round(NIGHT_MIN + (DAY_MIN - NIGHT_MIN) * p);
+    tMax = Math.round(NIGHT_MAX + (DAY_MAX - NIGHT_MAX) * p);
+
+  } else {
+    tMin = NIGHT_MIN; tMax = NIGHT_MAX; // フォールバック
+  }
+
+  // 30分ごとにわずかにランダム変動（不自然な固定値を避ける）
+  var slowPeriod = Math.floor(now.getTime() / (30 * 60 * 1000));
+  var r = _botPRNG(slowPeriod);
+  return Math.floor(r() * (tMax - tMin + 1)) + tMin;
+}
+
+
+// ══════════════════════════════════════════════════════════════
+//  機能2: デイリースケジュール保存・取得
+// ══════════════════════════════════════════════════════════════
+
+// 日付の比較用ヘルパー（スプレッドシートが日付を Date オブジェクトに変換するケースに対応）
+function _dateStr(val) {
+  if (!val) return '';
+  if (val instanceof Date) return Utilities.formatDate(val, 'Asia/Tokyo', 'yyyy-MM-dd');
+  return String(val).trim().slice(0, 10); // "2026-08-19T..." から先頭10文字
+}
+
+function saveSchedule(studentCode, date, schedule) {
+  try {
+    var ss = _getSS();
+    var sh = ss.getSheetByName(SHEET_SCHEDULE);
+    if (!sh) {
+      sh = ss.insertSheet(SHEET_SCHEDULE);
+      sh.appendRow(['登録日時', '生徒コード', '日付（文字列）', 'スケジュールJSON']);
+    }
+    var dateStr = String(date).trim();
+    // 同じ日付の既存データを削除（上書き保存）
+    var data = sh.getDataRange().getValues();
+    for (var i = data.length - 1; i >= 1; i--) {
+      if (String(data[i][1]).trim() === String(studentCode).trim() &&
+          _dateStr(data[i][2]) === dateStr) {
+        sh.deleteRow(i + 1);
+      }
+    }
+    // C列を文字列として強制保存（' プレフィックスで日付変換を防ぐ）
+    var lastRow = sh.getLastRow() + 1;
+    sh.getRange(lastRow, 1).setValue(new Date());     // A: タイムスタンプ
+    sh.getRange(lastRow, 2).setValue(studentCode);    // B: 生徒コード
+    sh.getRange(lastRow, 3).setValue("'" + dateStr);  // C: 日付（文字列強制）
+    sh.getRange(lastRow, 4).setValue(schedule);       // D: JSON
+    SpreadsheetApp.flush();
+    return { success: true };
+  } catch(e) { return { success: false, message: e.message }; }
+}
+
+function getSchedule(studentCode, date) {
+  try {
+    var ss = _getSS();
+    var sh = ss.getSheetByName(SHEET_SCHEDULE);
+    if (!sh) return { success: true, schedule: '[]' };
+    var dateStr = String(date).trim();
+    var data = sh.getDataRange().getValues();
+    // 最新のデータを返す（後ろから検索）
+    for (var i = data.length - 1; i >= 1; i--) {
+      if (String(data[i][1]).trim() === String(studentCode).trim() &&
+          _dateStr(data[i][2]) === dateStr) {
+        var sched = String(data[i][3] || '[]').trim();
+        // シングルクォートプレフィックスを除去
+        if (sched.startsWith("'")) sched = sched.slice(1);
+        return { success: true, schedule: sched };
+      }
+    }
+    return { success: true, schedule: '[]' };
+  } catch(e) { return { success: false, schedule: '[]', message: e.message }; }
+}
+
+// ══════════════════════════════════════════════════════════════
+//  機能1: 未入室生徒の自動通知（毎朝8:40 GASトリガーで実行）
+//  事前準備: GASのスクリプトプロパティに
+//    キー: SUMMER_CHAT_WEBHOOK
+//    値: https://chat.googleapis.com/v1/spaces/AAQA1Y6MMYo/messages?key=...&token=XBWMw...
+//  を登録し、setupSummerTrigger() を一度だけ実行してください。
+// ══════════════════════════════════════════════════════════════
+
+function notifyAbsentStudents() {
+  var props   = PropertiesService.getScriptProperties();
+  var WEBHOOK = props.getProperty('SUMMER_CHAT_WEBHOOK');
+  if (!WEBHOOK) { Logger.log('SUMMER_CHAT_WEBHOOK が未設定です'); return; }
+
+  var ss  = SpreadsheetApp.getActiveSpreadsheet();
+  var now = new Date();
+
+  // ① 夏イベント参加者リスト（B列: 生徒コード）
+  var formSheet = ss.getSheetByName('夏イベント参加フォーム_raw');
+  if (!formSheet) { Logger.log('シートが見つかりません: 夏イベント参加フォーム_raw'); return; }
+  var formData = formSheet.getDataRange().getValues();
+  var targetCodes = {};
+  for (var i = 1; i < formData.length; i++) {
+    var code = String(formData[i][1]).trim();
+    if (code) targetCodes[code] = true;
+  }
+
+  // ② 当日の入室記録を確認
+  var todayStr   = jstDate(now);
+  var loginSheet = sh(SHEET_LOGIN);
+  var loginData  = loginSheet.getDataRange().getValues();
+  var enteredCodes = {};
+  for (var j = 1; j < loginData.length; j++) {
+    var ts   = loginData[j][0];
+    var code = String(loginData[j][1]).trim();
+    var act  = String(loginData[j][2]).trim();
+    if (!ts) continue;
+    var tsDate = Utilities.formatDate(ts instanceof Date ? ts : new Date(ts), 'Asia/Tokyo', 'yyyy-MM-dd');
+    if (tsDate === todayStr && act === '入室') enteredCodes[code] = true;
+  }
+
+  // ③ 未入室者を抽出
+  var absent = Object.keys(targetCodes).filter(function(c) { return !enteredCodes[c]; });
+
+  // ④ 生徒マスターから氏名を取得
+  var stData    = sh(SHEET_STUDENTS).getDataRange().getValues();
+  var nameMap   = {};
+  for (var k = 1; k < stData.length; k++) {
+    nameMap[String(stData[k][1]).trim()] = String(stData[k][2]).trim();
+  }
+
+  // ⑤ Google Chat に送信
+  var timeStr = Utilities.formatDate(now, 'Asia/Tokyo', 'HH:mm');
+  var msg;
+  if (absent.length === 0) {
+    msg = '✅ *' + todayStr + ' ' + timeStr + ' 時点*\n対象生徒全員の入室を確認しました！🎉';
+  } else {
+    var lines = absent.map(function(c, i) {
+      var name = nameMap[c] || c;
+      return (i + 1) + '. ' + name + '（`' + c + '`）';
+    });
+    msg = '⚠️ *' + todayStr + ' ' + timeStr + ' 未入室の生徒*\n\n' +
+          lines.join('\n') +
+          '\n\n計 *' + absent.length + '名* が未入室です。';
+  }
+
+  UrlFetchApp.fetch(WEBHOOK, {
+    method: 'post', contentType: 'application/json',
+    payload: JSON.stringify({ text: msg }), muteHttpExceptions: true
   });
 }
 
-// ════════════════════════════════════════════════
-//  INIT
-// ════════════════════════════════════════════════
-window.addEventListener('load', function() {
-  var sc   = localStorage.getItem('ara_code');
-  var name = localStorage.getItem('ara_name');
-  var goal = localStorage.getItem('ara_goal');
-  var sid  = localStorage.getItem('ara_sid');
-  var st   = localStorage.getItem('ara_stime');
-
-  if (sc && name) {
-    U = { studentCode: sc, name: name, weeklyGoalHours: Number(goal) || 10 };
-    if (sid && st) SESSION = { sessionId: sid, startTime: new Date(st) };
-    showDash();
-    loadDash();
-    startPoll();
-    if (SESSION) startTimerDisplay();
-  } else {
-    showLogin();
-    fetchLiveForLogin();
-  }
-});
-
-// ════════════════════════════════════════════════
-//  SCREEN
-// ════════════════════════════════════════════════
-function showLogin() {
-  document.getElementById('screen-login').classList.remove('hidden');
-  document.getElementById('screen-dash').classList.add('hidden');
-  stopTimer(); stopPoll();
-}
-function showDash() {
-  document.getElementById('screen-login').classList.add('hidden');
-  document.getElementById('screen-dash').classList.remove('hidden');
-  if (U) document.getElementById('hdr-name').textContent = U.name + ' さん';
-}
-
-// ════════════════════════════════════════════════
-//  LOGIN
-// ════════════════════════════════════════════════
-function login() {
-  var code = document.getElementById('code-input').value.trim().toUpperCase();
-  if (!code) { showErr('生徒コードを入力してください'); return; }
-  showLoading(true); clearErr();
-
-  gasCall('authenticate', { studentCode: code },
-    function(res) {
-      if (!res.success) { showLoading(false); showErr(res.message); return; }
-      U = { studentCode: res.studentCode, name: res.name, weeklyGoalHours: res.weeklyGoalHours };
-
-      gasCall('startStudy', { studentCode: res.studentCode },
-        function(sr) {
-          showLoading(false);
-          SESSION = { sessionId: sr.sessionId, startTime: new Date(sr.startTime) };
-          localStorage.setItem('ara_code',  U.studentCode);
-          localStorage.setItem('ara_name',  U.name);
-          localStorage.setItem('ara_goal',  U.weeklyGoalHours);
-          localStorage.setItem('ara_sid',   sr.sessionId);
-          localStorage.setItem('ara_stime', sr.startTime);
-          showDash(); loadDash(); startPoll(); startTimerDisplay();
-          showToast('入室しました 🎯');
-        },
-        function(e) { showLoading(false); showErr('接続エラーが発生しました。もう一度お試しください。'); }
-      );
-    },
-    function(e) { showLoading(false); showErr('接続エラーが発生しました。もう一度お試しください。'); }
-  );
-}
-
-document.getElementById('code-input').addEventListener('keydown', function(e) {
-  if (e.key === 'Enter') login();
-});
-
-// ════════════════════════════════════════════════
-//  LOGOUT
-// ════════════════════════════════════════════════
-function confirmLogout() {
-  if (!confirm('退出しますか？\n勉強時間が記録されます。')) return;
-  logout();
-}
-
-function logout() {
-  showLoading(true);
-
-  function clearAndGo() {
-    showLoading(false);
-    U = SESSION = DASH_DATA = null;
-    PREV_TODAY_MINS = 0;
-    localStorage.removeItem('ara_code');  localStorage.removeItem('ara_name');
-    localStorage.removeItem('ara_goal');  localStorage.removeItem('ara_sid');
-    localStorage.removeItem('ara_stime');
-    document.getElementById('code-input').value = '';
-    showLogin(); fetchLiveForLogin();
-    showToast('お疲れさまでした！記録しました ✅');
-  }
-
-  if (SESSION && U) {
-    gasCall('stopStudy',
-      { studentCode: U.studentCode, sessionId: SESSION.sessionId, startTime: SESSION.startTime.toISOString() },
-      clearAndGo, clearAndGo
-    );
-  } else {
-    clearAndGo();
-  }
-}
-
-// ════════════════════════════════════════════════
-//  SESSION TOGGLE
-// ════════════════════════════════════════════════
-function toggleSession() {
-  if (SESSION) {
-    if (!confirm('退室して勉強時間を記録しますか？')) return;
-    showLoading(true);
-    gasCall('stopStudy',
-      { studentCode: U.studentCode, sessionId: SESSION.sessionId, startTime: SESSION.startTime.toISOString() },
-      function(res) {
-        showLoading(false);
-        SESSION = null;
-        localStorage.removeItem('ara_sid'); localStorage.removeItem('ara_stime');
-        stopTimer(); updateTimerUI(false);
-        showToast('お疲れさまでした！ +' + (res.durationMins || 0) + '分 記録しました');
-        loadDash();
-      },
-      function() { showLoading(false); showToast('エラーが発生しました'); }
-    );
-  } else {
-    showLoading(true);
-    gasCall('startStudy', { studentCode: U.studentCode },
-      function(sr) {
-        showLoading(false);
-        SESSION = { sessionId: sr.sessionId, startTime: new Date(sr.startTime) };
-        localStorage.setItem('ara_sid',   sr.sessionId);
-        localStorage.setItem('ara_stime', sr.startTime);
-        startTimerDisplay(); updateTimerUI(true);
-        showToast('入室しました 📚');
-      },
-      function() { showLoading(false); }
-    );
-  }
-}
-
-// ════════════════════════════════════════════════
-//  TIMER
-// ════════════════════════════════════════════════
-function startTimerDisplay() { stopTimer(); updateTimerUI(true); TIMER_IV = setInterval(tickTimer, 1000); }
-function stopTimer() { if (TIMER_IV) { clearInterval(TIMER_IV); TIMER_IV = null; } }
-
-function tickTimer() {
-  if (!SESSION) return;
-  var elapsed = Math.floor((Date.now() - SESSION.startTime.getTime()) / 1000);
-  document.getElementById('timer-disp').textContent = fmtTime(elapsed);
-  renderTodayMins(PREV_TODAY_MINS + Math.floor(elapsed / 60));
-}
-
-function updateTimerUI(inSession) {
-  var btn   = document.getElementById('btn-main-action');
-  var disp  = document.getElementById('timer-disp');
-  var stat  = document.getElementById('entry-status');
-  var sub   = document.getElementById('timer-sub');
-  var slbl  = document.getElementById('entry-subj-lbl');
-  if (inSession) {
-    btn.className = 'btn-exit'; btn.textContent = '退室する';
-    disp.className = 'timer-display timer-active';
-    stat.classList.remove('hidden'); slbl.textContent = SELECTED_SUBJ + ' 勉強中';
-    sub.textContent = '集中して頑張ろう！退室ボタンで時間が記録されます';
-  } else {
-    btn.className = 'btn-enter'; btn.textContent = '入室する →';
-    disp.className = 'timer-display timer-idle'; disp.textContent = '00:00:00';
-    stat.classList.add('hidden'); sub.textContent = '科目を選んで入室しましょう';
-  }
-}
-
-function selSubj(el) {
-  document.querySelectorAll('.subj-chip').forEach(function(c){ c.classList.remove('active'); });
-  el.classList.add('active');
-  SELECTED_SUBJ = el.textContent;
-  document.getElementById('entry-subj-lbl').textContent = SELECTED_SUBJ + ' 勉強中';
-}
-
-// ════════════════════════════════════════════════
-//  DASHBOARD
-// ════════════════════════════════════════════════
-function loadDash() {
-  if (!U) return;
-  gasCall('getDashboard', { studentCode: U.studentCode },
-    function(data) { DASH_DATA = data; renderDash(data); },
-    function() {}
-  );
-  gasCall('getRecentReports', {}, renderFeed, function() {});
-}
-
-function renderDash(data) {
-  if (!data || data.error) return;
-  PREV_TODAY_MINS = 0;
-  if (data.weekDays) {
-    data.weekDays.forEach(function(d) { if (d.date === data.today) PREV_TODAY_MINS = d.minutes; });
-  }
-  if (!SESSION) renderTodayMins(PREV_TODAY_MINS);
-
-  var totalH = (data.totalMins / 60).toFixed(1);
-  document.getElementById('stat-total').innerHTML = totalH + '<span style="font-size:14px">h</span>';
-
-  var pct    = data.goalMins > 0 ? Math.min(100, Math.round(data.weeklyMins / data.goalMins * 100)) : 0;
-  var curH   = (data.weeklyMins / 60).toFixed(1);
-  var remH   = ((Math.max(0, data.goalMins - data.weeklyMins)) / 60).toFixed(1);
-
-  document.getElementById('ring-pct').textContent  = pct + '%';
-  document.getElementById('prog-cur').textContent  = curH;
-  document.getElementById('prog-goal').textContent = data.goalHours;
-  var remEl = document.getElementById('prog-remain');
-  if (pct >= 100) { remEl.textContent = '🎉 今週の目標達成！おめでとう！'; remEl.className = 'prog-remain done'; }
-  else            { remEl.textContent = 'あと ' + remH + 'h で目標達成！'; remEl.className = 'prog-remain'; }
-
-  var circ   = 2 * Math.PI * 36;
-  var offset = circ * (1 - pct / 100);
-  document.getElementById('ring-fill').setAttribute('stroke-dashoffset', offset.toFixed(1));
-  document.getElementById('ring-fill').setAttribute('stroke-dasharray',  circ.toFixed(1));
-
-  document.getElementById('goal-range').value          = data.goalHours;
-  document.getElementById('goal-val').textContent       = data.goalHours;
-
-  renderWeekBars(data.weekDays, data.today, data.goalMins);
-  renderStreak(data.streak, data.weekDays, data.today);
-}
-
-function renderTodayMins(mins) {
-  var h = Math.floor(mins / 60), m = mins % 60;
-  document.getElementById('stat-today').innerHTML = (h > 0 ? h + 'h ' + m + 'm' : m + '分');
-}
-
-function renderWeekBars(days, today, goalMins) {
-  if (!days || !days.length) return;
-  var maxMins = Math.max(goalMins / 7 * 1.5, 1);
-  days.forEach(function(d){ if (d.minutes > maxMins) maxMins = d.minutes; });
-  var html = '';
-  days.forEach(function(d) {
-    var isToday = d.date === today;
-    var pct     = Math.min(100, Math.round(d.minutes / maxMins * 100));
-    var cls     = d.minutes > 0 ? (isToday ? 'today-bar' : '') : 'empty-bar';
-    var lbl     = d.minutes >= 60 ? Math.floor(d.minutes/60)+'h'+(d.minutes%60>0?d.minutes%60+'m':'') : (d.minutes>0?d.minutes+'m':'');
-    html += '<div class="day-col">'
-          + '<div class="bar-wrap"><div class="bar '+ cls +'" style="height:'+ Math.max(pct,0) +'%"></div></div>'
-          + '<div class="day-lbl'+ (isToday?' today-lbl':'') +'">'+ d.label +'</div>'
-          + '<div class="day-mins">'+ lbl +'</div></div>';
+// GASトリガー設定（一度だけ実行する）
+function setupSummerTrigger() {
+  // 既存の同名トリガーを削除
+  ScriptApp.getProjectTriggers().forEach(function(t) {
+    if (t.getHandlerFunction() === 'notifyAbsentStudents') ScriptApp.deleteTrigger(t);
   });
-  document.getElementById('week-bars').innerHTML = html;
+  // 毎日8:40前後に実行
+  ScriptApp.newTrigger('notifyAbsentStudents')
+    .timeBased().atHour(8).nearMinute(40).everyDays(1).create();
+  Logger.log('トリガーを設定しました: notifyAbsentStudents（毎日8:40）');
 }
 
-function renderStreak(streak, days, today) {
-  document.getElementById('streak-num').textContent = streak;
-  var levels = [[30,'🏆 逆転の申し子'],[14,'💪 本気モード'],[7,'🔥 熱量上昇中'],[3,'⚡ 加速中'],[0,'🌱 スタート']];
-  var lv = '🌱 スタート';
-  for (var i = 0; i < levels.length; i++) { if (streak >= levels[i][0]) { lv = levels[i][1]; break; } }
-  document.getElementById('streak-level').textContent = lv;
-  if (!days) return;
-  var html = '';
-  days.forEach(function(d) {
-    var cls = d.date === today ? 'today' : d.minutes > 0 ? 'done' : '';
-    html += '<div class="s-dot '+ cls +'">'+ d.label +'</div>';
-  });
-  document.getElementById('streak-dots').innerHTML = html;
+// ── コールドスタート防止（5分おきのトリガーで実行）────────────────
+// 設定: GASトリガー → keepAlive → 5分おき
+function keepAlive() {
+  return { ok: true, ts: new Date().toISOString() };
 }
 
-function renderFeed(reports) {
-  var el = document.getElementById('feed-list');
-  if (!reports || reports.length === 0) {
-    el.innerHTML = '<div style="text-align:center;color:var(--t2);padding:16px;font-size:13px">まだ報告がありません。最初に投稿してみましょう！</div>';
-    return;
+function doGet(e) {
+  return HtmlService.createHtmlOutput('<h2>GAS API は正常に動作しています ✅</h2>')
+    .setTitle('逆転アクセラルーム API');
+}
+
+// ══════════════════════════════════════════════════════════════
+//  doPost アクションテーブル
+//  ★ 従来は if/else if の連鎖（28行）でルーティングしていたが、
+//    アクション名 → 実行関数 のマップ方式に変更。
+//    新しいアクションを追加する際は下の ACTION_HANDLERS に
+//    1行追加するだけでよく、else if の書き忘れ・順序ミスを防げる。
+//    各ハンドラは params を受け取り、必要な引数を自分で取り出す。
+// ══════════════════════════════════════════════════════════════
+var ACTION_HANDLERS = {
+  authenticate:         function(p) { return authenticate(p.studentCode, p.studentName); },
+  startStudy:           function(p) { return startStudy(p.studentCode, p.nickname); },
+  stopStudy:            function(p) { return stopStudy(p.studentCode, p.sessionId, p.startTime); },
+  getLiveStats:         function(p) { return getLiveStats(); },
+  getDashboard:         function(p) { return getDashboard(p.studentCode); },
+  getRecentReports:     function(p) { return getRecentReports(); },
+  postReport:           function(p) { return postReport(p.studentCode, p.message, p.nickname); },
+  postConsultation:     function(p) { return postConsultation(p.studentCode, p.message); },
+  setWeeklyGoal:        function(p) { return setWeeklyGoal(p.studentCode, p.hours); },
+  getConsultations:     function(p) { return getConsultations(p.studentCode); },
+  getActivityCalendar:  function(p) { return getActivityCalendar(p.studentCode, p.days); },
+  replyToConsultation:  function(p) { return replyToConsultation(p.studentCode, p.row, p.reply); },
+  getAdminStudents:     function(p) { return getAdminStudents(); },
+  getAdminConsultations:function(p) { return getAdminConsultations(); },
+  getAdminData:         function(p) { return getAdminData(); },
+  coachCheckIn:         function(p) { return coachCheckIn(p.checkoutTime); },
+  coachCheckOut:        function(p) { return coachCheckOut(); },
+  getCoachStatus:       function(p) { return getCoachStatus(); },
+  saveSchedule:         function(p) { return saveSchedule(p.studentCode, p.date, p.schedule); },
+  getSchedule:          function(p) { return getSchedule(p.studentCode, p.date); },
+  updateHeartbeat:      function(p) { return updateHeartbeat(p.studentCode, p.sessionId, p.subject); },
+  recordLap:            function(p) { return recordLap(p.studentCode, p.sessionId, p.lapStartTime, p.lapEndTime, p.netMins, p.subject); },
+  recordAllLaps:        function(p) { return recordAllLaps(p.studentCode, p.sessionId, p.lapsJson, p.satisfaction, p.feedback); }
+};
+
+function doPost(e) {
+  try {
+    var params  = JSON.parse(e.postData.contents);
+    var handler = ACTION_HANDLERS[params.action];
+    var result  = handler ? handler(params) : { error: 'Unknown action: ' + params.action };
+
+    return ContentService
+      .createTextOutput(JSON.stringify(result))
+      .setMimeType(ContentService.MimeType.JSON);
+
+  } catch (err) {
+    return ContentService
+      .createTextOutput(JSON.stringify({ error: err.message }))
+      .setMimeType(ContentService.MimeType.JSON);
   }
-  var html = '';
-  reports.forEach(function(r) {
-    var init = r.code ? r.code.slice(-2) : '??';
-    html += '<div class="feed-post"><div class="feed-av">'+ init +'</div>'
-          + '<div class="feed-body"><div class="feed-meta">'+ r.code +' · '+ r.time +'</div>'
-          + '<div class="feed-msg">'+ esc(r.message) +'</div></div></div>';
+}
+
+// ★ パフォーマンス改善：スプレッドシート／シートオブジェクトをキャッシュ
+//   従来は sh() が呼ばれるたびに getActiveSpreadsheet() と
+//   getSheetByName() を実行しており、1回のリクエスト内で同じシートに
+//   何度もアクセスする関数（getAdminData 等）で無駄な呼び出しが発生していた。
+//   実行コンテキスト内でキャッシュすることで、同一シートへの
+//   2回目以降のアクセスをメモリ参照のみに削減する。
+var _ssCache    = null;
+var _sheetCache = {};
+function _getSS() {
+  if (!_ssCache) _ssCache = SpreadsheetApp.getActiveSpreadsheet();
+  return _ssCache;
+}
+function sh(name) {
+  if (!_sheetCache[name]) _sheetCache[name] = _getSS().getSheetByName(name);
+  return _sheetCache[name];
+}
+
+function jstDate(d) {
+  return Utilities.formatDate(d || new Date(), 'Asia/Tokyo', 'yyyy-MM-dd');
+}
+
+function getMondayStr() {
+  var now = new Date();
+  var jst = new Date(now.getTime() + 9 * 3600 * 1000);
+  var dow = jst.getUTCDay();
+  var back = dow === 0 ? 6 : dow - 1;
+  jst.setUTCDate(jst.getUTCDate() - back);
+  var y = jst.getUTCFullYear();
+  var m = String(jst.getUTCMonth() + 1).padStart(2, '0');
+  var d = String(jst.getUTCDate()).padStart(2, '0');
+  return y + '-' + m + '-' + d;
+}
+
+function addDays(dateStr, n) {
+  var d = new Date(dateStr + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() + n);
+  var y = d.getUTCFullYear();
+  var m = String(d.getUTCMonth() + 1).padStart(2, '0');
+  var dd = String(d.getUTCDate()).padStart(2, '0');
+  return y + '-' + m + '-' + dd;
+}
+
+// ★ 列構成変更対応 + ステータスチェック追加
+function authenticate(studentCode, studentName) {
+  try {
+    var code = String(studentCode || '').trim().toUpperCase();
+    if (!code) return { success: false, message: '生徒コードを入力してください。' };
+
+    // 入力氏名を正規化（全角スペース→半角、前後トリム）
+    var nameInput = String(studentName || '').trim().replace(/\u3000/g, ' ');
+
+    var data = sh(SHEET_STUDENTS).getDataRange().getValues();
+    for (var i = 1; i < data.length; i++) {
+      // B列(index 1) = 生徒コード
+      if (String(data[i][1]).trim().toUpperCase() === code) {
+
+        // A列(index 0) = ステータス チェック
+        var status = String(data[i][0]).trim();
+        if (BLOCKED_STATUSES.indexOf(status) !== -1) {
+          return {
+            success: false,
+            message: '現在このアカウントではログインできません。\n塾へお問い合わせください。'
+          };
+        }
+
+        // C列(index 2) = 氏名 照合
+        if (nameInput) {
+          var storedName = String(data[i][2]).trim().replace(/\u3000/g, ' ');
+          if (storedName !== nameInput) {
+            return { success: false, message: '氏名が正しくありません。\nもう一度確認して入力してください。' };
+          }
+        }
+
+        return {
+          success:         true,
+          studentCode:     String(data[i][1]).trim(),
+          name:            String(data[i][2]).trim() || code,
+          weeklyGoalHours: Number(data[i][3]) || 10   // D列(index 3)
+        };
+      }
+    }
+    return { success: false, message: '生徒コードが正しくありません。\n確認してもう一度入力してください。' };
+  } catch (e) {
+    return { success: false, message: 'エラー: ' + e.message };
+  }
+}
+
+function startStudy(studentCode, nickname) {
+  try {
+    // ★ スタレセッション削除＋同一生徒の古いセッション削除を1回のシート読み込みで実施
+    //   （旧実装は cleanupStaleSessions() と _cleanupOldSessions() で
+    //    アクティブセッションシートを2回読み込んでいたため統合）
+    _cleanupActiveSheet(studentCode);
+    var sessionId = Utilities.getUuid();
+    var now       = new Date();
+    sh(SHEET_ACTIVE).appendRow([studentCode, now.toISOString(), sessionId, '', nickname || '']); // E列にニックネーム
+    sh(SHEET_LOGIN).appendRow([now, studentCode, '入室', '']);
+    return { success: true, sessionId: sessionId, startTime: now.toISOString() };
+  } catch (e) {
+    return { success: false, message: e.message };
+  }
+}
+
+function stopStudy(studentCode, sessionId, startTimeStr, netMins, subject) {
+  try {
+    var now          = new Date();
+    var startTime    = new Date(startTimeStr);
+    // クライアントから正味勉強時間を受け取る（休憩除く）、なければ壁時計で計算
+    var durationMins = (netMins != null && Number(netMins) >= 0)
+                       ? Math.round(Number(netMins))
+                       : Math.round((now - startTime) / 60000);
+    _removeActiveSession(sessionId);
+    var durationSecs2 = Math.round((now - startTime) / 1000);
+    if (durationMins < 1 && durationSecs2 >= 30) durationMins = 1;
+    if (durationMins >= 1) {
+      sh(SHEET_STUDY).appendRow([
+        sessionId, studentCode, startTime, now, durationMins, jstDate(startTime), subject || ''
+      ]);
+    }
+    sh(SHEET_LOGIN).appendRow([now, studentCode, '退室', durationMins + '分']);
+    return { success: true, durationMins: durationMins };
+  } catch (e) {
+    return { success: false, message: e.message };
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+//  アクティブセッションシートの一括クリーンアップ
+//  ★ パフォーマンス改善：
+//    旧実装は cleanupStaleSessions()（スタレセッション削除）と
+//    _cleanupOldSessions()（同一生徒の古いセッション削除）が
+//    それぞれ getDataRange().getValues() でシート全体を読み込み、
+//    該当行ごとに deleteRow() を個別呼び出ししていた
+//    （入室のたびにシート読み込み2回＋削除N回のAPI呼び出し）。
+//    ここでは両者のロジックを統合し、
+//    「1回の読み込み → 判定 → 1〜2回の書き込みでシートを再構築」
+//    に変更し、GAS実行時間とAPIクォータ消費を削減している。
+// ══════════════════════════════════════════════════════════════
+function _cleanupActiveSheet(studentCode) {
+  var sheet = sh(SHEET_ACTIVE);
+  var data  = sheet.getDataRange().getValues();
+  if (data.length <= 1) return; // ヘッダー行のみ＝対象なし
+
+  var now       = new Date();
+  var STALE_MS  = 15 * 60 * 1000; // ハートビートありの猶予（getLiveStatsのcleanupStaleSessionsと同じ基準）
+  var GRACE_MS  = 10 * 60 * 1000; // ハートビートまだ無い場合の猶予
+  var code      = String(studentCode).trim();
+  var numCols   = sheet.getLastColumn();
+
+  var keptRows        = [];
+  var studyRowsToAdd   = [];
+  var loginRowsToAdd   = [];
+
+  for (var i = 1; i < data.length; i++) {
+    var row       = data[i];
+    var rowCode   = String(row[0]).trim();
+    var rawHB     = row[3];
+    var rawStart  = row[1];
+    var lastHB    = rawHB    ? (rawHB    instanceof Date ? rawHB    : new Date(rawHB))    : null;
+    var startedAt = rawStart ? (rawStart instanceof Date ? rawStart : new Date(rawStart)) : now;
+
+    var isSameStudent = (rowCode === code); // 同一生徒の古いセッション（多重入室）
+    var isStale        = lastHB
+                          ? (now - lastHB) > STALE_MS
+                          : (now - startedAt) > GRACE_MS;
+
+    if (isSameStudent || isStale) {
+      var endTime = lastHB || now;
+      var mins    = Math.round((endTime - startedAt) / 60000);
+      if (mins >= 1) {
+        studyRowsToAdd.push([row[2], rowCode, startedAt, endTime, mins, jstDate(startedAt)]);
+        loginRowsToAdd.push([endTime, rowCode, isStale ? '自動退室（タブ離脱）' : '自動退室（多重入室）', mins + '分']);
+      }
+      // このセッションは削除（keptRowsに入れない）
+    } else {
+      keptRows.push(row);
+    }
+  }
+
+  // ── アクティブセッションシートを1〜2回の書き込みで再構築 ──
+  var removedCount = (data.length - 1) - keptRows.length;
+  if (removedCount > 0) {
+    if (keptRows.length > 0) {
+      sheet.getRange(2, 1, keptRows.length, numCols).setValues(keptRows);
+    }
+    sheet.getRange(2 + keptRows.length, 1, removedCount, numCols).clearContent();
+  }
+
+  // ── 勉強記録・ログイン記録をまとめて追記（appendRowの繰り返しを回避） ──
+  if (studyRowsToAdd.length > 0) {
+    var studySheet = sh(SHEET_STUDY);
+    studySheet.getRange(studySheet.getLastRow() + 1, 1, studyRowsToAdd.length, studyRowsToAdd[0].length)
+      .setValues(studyRowsToAdd);
+  }
+  if (loginRowsToAdd.length > 0) {
+    var loginSheet = sh(SHEET_LOGIN);
+    loginSheet.getRange(loginSheet.getLastRow() + 1, 1, loginRowsToAdd.length, loginRowsToAdd[0].length)
+      .setValues(loginRowsToAdd);
+  }
+}
+
+function _removeActiveSession(sessionId) {
+  var sheet = sh(SHEET_ACTIVE);
+  var data  = sheet.getDataRange().getValues();
+  for (var i = data.length - 1; i >= 1; i--) {
+    if (String(data[i][2]).trim() === String(sessionId).trim()) {
+      sheet.deleteRow(i + 1);
+      return;
+    }
+  }
+}
+
+function getLiveStats() {
+  try {
+    var activeData  = sh(SHEET_ACTIVE).getDataRange().getValues();
+    var now         = new Date();
+    var HB_VALID_MS = 15 * 60 * 1000;
+    var GRACE_MS    = 10 * 60 * 1000;
+    var activeCount = 0;
+    var ranking     = [];
+
+    // 学習報告からニックネームマップを作成（E列が空のセッションの補完用）
+    var reportData = sh(SHEET_REPORT).getDataRange().getValues();
+    var nickMap = {};
+    for (var nr = 1; nr < reportData.length; nr++) {
+      var rCode = String(reportData[nr][1] || '').trim();
+      var rNick = String(reportData[nr][3] || '').trim();
+      // bot_ / demo_ 除外、ニックネームがある場合のみ（後の行ほど新しい = 上書き）
+      if (rNick && rCode && !rCode.startsWith('bot_') && !rCode.startsWith('demo_')) {
+        nickMap[rCode] = rNick;
+      }
+    }
+
+    for (var j = 1; j < activeData.length; j++) {
+      var rawHB  = activeData[j][3];
+      var rawST  = activeData[j][1];
+      // E列のニックネーム → なければ学習報告から補完
+      var rawNick = String(activeData[j][4] || '').trim() ||
+                    nickMap[String(activeData[j][0]).trim()] || '';
+      var isActive = false;
+
+      var hbTime, stTime;
+      if (rawHB) {
+        hbTime   = rawHB instanceof Date ? rawHB : new Date(rawHB);
+        isActive = !isNaN(hbTime) && (now - hbTime) < HB_VALID_MS;
+      } else if (rawST) {
+        stTime   = rawST instanceof Date ? rawST : new Date(rawST);
+        isActive = !isNaN(stTime) && (now - stTime) < GRACE_MS;
+      }
+
+      if (isActive) {
+        activeCount++;
+        // 秒単位で送信（分単位の丸めで同タイムになる問題を解消）
+        var st       = rawST instanceof Date ? rawST : new Date(rawST);
+        var elapsedS = Math.max(0, Math.round((now - st) / 1000));
+        var rawSubj = String(activeData[j][5] || '').trim(); // F列: 現在の科目
+        ranking.push({
+          nick:    rawNick || '匿名',
+          mins:    Math.floor(elapsedS / 60),
+          secs:    elapsedS % 60,
+          subject: rawSubj || '—',
+          code:    String(activeData[j][0])
+        });
+      }
+    }
+
+    // 本日の勉強記録（日付の型を正しく処理）
+    var studyData  = sh(SHEET_STUDY).getDataRange().getValues();
+    var today      = jstDate(now); // 引数を明示
+    var todayMins  = 0;
+    var todayUsers = {};
+    for (var i = 1; i < studyData.length; i++) {
+      var rawDate  = studyData[i][5];
+      var dateStr  = rawDate instanceof Date
+                     ? Utilities.formatDate(rawDate, 'Asia/Tokyo', 'yyyy-MM-dd')
+                     : String(rawDate || '');
+      if (dateStr === today) {
+        todayMins += Number(studyData[i][4]) || 0;
+        todayUsers[String(studyData[i][1]).trim()] = true;
+      }
+    }
+    for (var k = 1; k < activeData.length; k++) todayUsers[activeData[k][0]] = true;
+
+    // ランキング: 経過時間が長い順
+    ranking.sort(function(a,b){return(b.mins*60+(b.secs||0))-(a.mins*60+(a.secs||0));});
+
+    // ── Bot在席を追加（表示用のみ / KPIには使用しない）──
+    var botTarget = _getBotTargetCount();
+    var botCount  = Math.max(0, Math.min(botTarget - activeCount, _BOT_TARGET_MAX));
+    var bots      = _generateBotParticipants(botCount);
+    var allParts  = ranking.slice().concat(bots);
+    allParts.sort(function(a,b){return(b.mins*60+(b.secs||0))-(a.mins*60+(a.secs||0));});
+
+    // Bot分の勉強時間を表示用に加算（参加者リストとの整合性）
+    var botTodayMins  = bots.reduce(function(s,b){return s+b.mins;},0);
+    var realUserCount = Object.keys(todayUsers).length;
+
+    return {
+      activeCount:         activeCount + botCount,   // 表示用（Bot含む）
+      realActiveCount:     activeCount,               // KPI・管理者用（実のみ）
+      todayUserCount:      realUserCount + bots.length, // 表示用（Bot含む）
+      realTodayUserCount:  realUserCount,             // 管理者用（実のみ）
+      todayMins:           todayMins + botTodayMins,  // 表示用（Bot込み）
+      realTodayMins:       todayMins,                 // 管理者用（実のみ）
+      ranking:             allParts.slice(0, 3),
+      participants:        allParts
+    };
+  } catch (e) {
+    return { activeCount: 0, realActiveCount: 0, todayUserCount: 0, realTodayUserCount: 0, todayMins: 0, realTodayMins: 0, ranking: [], participants: [] };
+  }
+}
+
+// ★ 生徒コード: B列(index 1)、週間目標: D列(index 3) に変更
+function getDashboard(studentCode) {
+  try {
+    var studyData    = sh(SHEET_STUDY).getDataRange().getValues();
+    var studentsData = sh(SHEET_STUDENTS).getDataRange().getValues();
+    var mondayStr    = getMondayStr();
+    var dailyMap     = {};
+    var allDates     = {};
+    var weeklyMins   = 0;
+    var totalMins    = 0;
+
+    for (var i = 1; i < studyData.length; i++) {
+      if (String(studyData[i][1]).trim() !== String(studentCode).trim()) continue;
+      // GAS/Sheetsが日付をDateオブジェクトとして返す場合を考慮
+      var rawDate = studyData[i][5];
+      var dateStr = rawDate instanceof Date
+                    ? Utilities.formatDate(rawDate, 'Asia/Tokyo', 'yyyy-MM-dd')
+                    : String(rawDate || '');
+      var mins    = Number(studyData[i][4]) || 0;
+      totalMins  += mins;
+      if (dateStr) allDates[dateStr] = true;
+      if (dateStr && dateStr >= mondayStr) {
+        weeklyMins         += mins;
+        dailyMap[dateStr]   = (dailyMap[dateStr] || 0) + mins;
+      }
+    }
+
+    var weekDays = [];
+    var LABELS   = ['月', '火', '水', '木', '金', '土', '日'];
+    for (var d = 0; d < 7; d++) {
+      var ds = addDays(mondayStr, d);
+      weekDays.push({ date: ds, label: LABELS[d], minutes: dailyMap[ds] || 0 });
+    }
+
+    var today     = jstDate();
+    var yesterday = addDays(today, -1);
+    var streak    = 0;
+    var check     = allDates[today] ? today : allDates[yesterday] ? yesterday : null;
+    if (check) {
+      while (allDates[check]) { streak++; check = addDays(check, -1); }
+    }
+
+    // ★ B列(index 1)で生徒コード照合、D列(index 3)で週間目標取得
+    var goalHours = 10;
+    for (var k = 1; k < studentsData.length; k++) {
+      if (String(studentsData[k][1]).trim() === String(studentCode).trim()) {
+        goalHours = Number(studentsData[k][3]) || 10;
+        break;
+      }
+    }
+
+    return {
+      weeklyMins: weeklyMins,
+      goalHours:  goalHours,
+      goalMins:   goalHours * 60,
+      streak:     streak,
+      totalMins:  totalMins,
+      weekDays:   weekDays,
+      today:      today
+    };
+  } catch (e) {
+    return { error: e.message };
+  }
+}
+
+function getRecentReports() {
+  try {
+    var data    = sh(SHEET_REPORT).getDataRange().getValues();
+    var reports = [];
+    for (var i = data.length - 1; i >= 1 && reports.length < 20; i--) {
+      if (!data[i][2]) continue;
+      var rawTs = data[i][0];
+      reports.push({
+        ts:      rawTs ? (rawTs instanceof Date ? rawTs.toISOString() : new Date(rawTs).toISOString()) : '',
+        time:    rawTs ? Utilities.formatDate(rawTs instanceof Date ? rawTs : new Date(rawTs), 'Asia/Tokyo', 'HH:mm') : '',
+        code:    data[i][1],
+        message: data[i][2],
+        nick:    data[i][3] || '' // D列: ニックネーム
+      });
+    }
+    return reports;
+  } catch (e) { return []; }
+}
+
+function postReport(studentCode, message, nickname) {
+  try {
+    sh(SHEET_REPORT).appendRow([new Date(), studentCode, message.trim(), nickname || '']);
+    return { success: true };
+  } catch (e) { return { success: false }; }
+}
+
+
+// ── Google Chat 通知 ─────────────────────────────────────────────
+function notifyGoogleChat(text) {
+  try {
+    UrlFetchApp.fetch(GOOGLE_CHAT_WEBHOOK, {
+      method: 'post',
+      contentType: 'application/json',
+      payload: JSON.stringify({ text: text }),
+      muteHttpExceptions: true
+    });
+  } catch(e) {
+    // 通知失敗でもメイン処理は止めない
+    console.log('Chat notification error:', e.message);
+  }
+}
+
+function postConsultation(studentCode, message) {
+  try {
+    var now = new Date();
+    sh(SHEET_CONSULT).appendRow([now, studentCode, message.trim(), '未読']);
+
+    // 生徒氏名を取得（通知用）
+    var studentsData = sh(SHEET_STUDENTS).getDataRange().getValues();
+    var studentName = studentCode;
+    for (var i = 1; i < studentsData.length; i++) {
+      if (String(studentsData[i][1]).trim() === String(studentCode).trim()) {
+        studentName = String(studentsData[i][2]).trim();
+        break;
+      }
+    }
+
+    // Google Chat に通知
+    var timeStr = Utilities.formatDate(now, 'Asia/Tokyo', 'HH:mm');
+    var notifyText =
+      '📬 *新しいQ&A質問が届きました！*\n\n' +
+      '👤 *生徒:* ' + studentName + '（' + studentCode + '）\n' +
+      '🕐 *受信:* ' + timeStr + '\n' +
+      '─────────────────\n' +
+      '❓ ' + message.trim() + '\n' +
+      '─────────────────\n' +
+      '▶ 管理画面から返信してください';
+    notifyGoogleChat(notifyText);
+
+    return { success: true };
+  } catch (e) { return { success: false }; }
+}
+
+// ★ B列(index 1)で生徒コード照合、D列(第4列)に週間目標を書き込む
+function setWeeklyGoal(studentCode, hours) {
+  try {
+    var sheet = sh(SHEET_STUDENTS);
+    var data  = sheet.getDataRange().getValues();
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][1]).trim() === String(studentCode).trim()) {
+        sheet.getRange(i + 1, 4).setValue(Number(hours));  // D列 = 第4列
+        return { success: true };
+      }
+    }
+    return { success: false };
+  } catch (e) { return { success: false }; }
+}
+
+// ── 相談取得（生徒自身のQ&Aを返す） ──────────────────────────────
+// 相談記録シート構成:
+//   A: タイムスタンプ / B: 生徒コード / C: メッセージ / D: ステータス / E: 返信（コーチが記入）
+function getConsultations(studentCode) {
+  try {
+    var data = sh(SHEET_CONSULT).getDataRange().getValues();
+    var results = [];
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][1]).trim() !== String(studentCode).trim()) continue;
+      results.push({
+        time:    data[i][0] ? Utilities.formatDate(new Date(data[i][0]), 'Asia/Tokyo', 'HH:mm') : '',
+        message: data[i][2] || '',
+        status:  data[i][3] || '未読',
+        reply:   data[i][4] || ''   // E列にコーチが返信を記入
+      });
+    }
+    return results.reverse(); // 新しい順
+  } catch (e) { return []; }
+}
+
+// ── 学習アクティビティカレンダーデータ取得 ─────────────────────────
+// 戻り値: [{date, hours, hasQ, hasPost, level}, ...]
+function getActivityCalendar(studentCode, days) {
+  try {
+    var daysNum = Math.min(Number(days) || 90, 366);
+    var now     = new Date();
+    var cutoff  = new Date(now.getTime() - daysNum * 24 * 3600 * 1000);
+    var cutoffStr = jstDate(cutoff);
+
+    var map = {}; // date -> {hours, hasQ, hasPost}
+
+    // 勉強記録（B列:コード / E列:分 / F列:日付）
+    var studyData = sh(SHEET_STUDY).getDataRange().getValues();
+    for (var i = 1; i < studyData.length; i++) {
+      if (String(studyData[i][1]).trim() !== String(studentCode).trim()) continue;
+      var rawDate = studyData[i][5];
+      var dateStr = rawDate instanceof Date
+        ? Utilities.formatDate(rawDate, 'Asia/Tokyo', 'yyyy-MM-dd')
+        : String(rawDate || '');
+      if (!dateStr || dateStr < cutoffStr) continue;
+      var mins = Number(studyData[i][4]) || 0;
+      if (!map[dateStr]) map[dateStr] = {hours: 0, hasQ: false, hasPost: false};
+      map[dateStr].hours += mins / 60;
+    }
+
+    // 学習報告（タイムライン・意気込み投稿）
+    var reportData = sh(SHEET_REPORT).getDataRange().getValues();
+    for (var j = 1; j < reportData.length; j++) {
+      if (String(reportData[j][1]).trim() !== String(studentCode).trim()) continue;
+      var rRaw = reportData[j][0];
+      if (!rRaw) continue;
+      var rStr = Utilities.formatDate(rRaw instanceof Date ? rRaw : new Date(rRaw), 'Asia/Tokyo', 'yyyy-MM-dd');
+      if (rStr < cutoffStr) continue;
+      if (!map[rStr]) map[rStr] = {hours: 0, hasQ: false, hasPost: false};
+      map[rStr].hasPost = true;
+    }
+
+    // 相談記録（Q&A質問）
+    var consultData = sh(SHEET_CONSULT).getDataRange().getValues();
+    for (var k = 1; k < consultData.length; k++) {
+      if (String(consultData[k][1]).trim() !== String(studentCode).trim()) continue;
+      var qRaw = consultData[k][0];
+      if (!qRaw) continue;
+      var qStr = Utilities.formatDate(qRaw instanceof Date ? qRaw : new Date(qRaw), 'Asia/Tokyo', 'yyyy-MM-dd');
+      if (qStr < cutoffStr) continue;
+      if (!map[qStr]) map[qStr] = {hours: 0, hasQ: false, hasPost: false};
+      map[qStr].hasQ = true;
+    }
+
+    // レベル計算して配列化
+    var output = [];
+    Object.keys(map).forEach(function(date) {
+      var d = map[date];
+      var h = Math.round(d.hours * 10) / 10;
+      var lv = 0;
+      if (h > 0)              lv = 1;  // ログイン
+      if (h >= 0.5 && d.hasPost) lv = 2;  // 勉強 + 投稿
+      if (h >= 2)             lv = 3;  // 2時間以上
+      if (h >= 4 || d.hasQ)  lv = 4;  // 4時間以上 or Q&A
+      output.push({date: date, hours: h, hasQ: d.hasQ, hasPost: d.hasPost, level: lv});
+    });
+    return output;
+  } catch(e) {
+    return [];
+  }
+}
+
+// ── 管理者: Q&A に返信 ──────────────────────────────────────────
+// 相談記録シートの指定行のE列に返信を書き込み、D列を「返信済」に更新
+function replyToConsultation(studentCode, row, reply) {
+  try {
+    var rowNum = Number(row);
+    if (isNaN(rowNum) || rowNum < 2) return { success: false, message: '行番号が不正です' };
+
+    var sheet = sh(SHEET_CONSULT);
+    var data  = sheet.getDataRange().getValues();
+
+    // 生徒コードを確認（セキュリティチェック）
+    if (rowNum - 1 >= data.length) return { success: false, message: '行が存在しません' };
+    var rowCode = String(data[rowNum - 1][1]).trim();
+    if (rowCode !== String(studentCode).trim()) {
+      return { success: false, message: '生徒コードが一致しません' };
+    }
+
+    sheet.getRange(rowNum, 5).setValue(reply.trim()); // E列: 返信内容
+    sheet.getRange(rowNum, 4).setValue('返信済');      // D列: ステータス
+
+    SpreadsheetApp.flush();
+    return { success: true };
+  } catch(e) {
+    return { success: false, message: e.message };
+  }
+}
+
+// ── 管理者: 入室中生徒 + Q&Aを1回のリクエストで取得 ─────────────
+// SHEET_STUDENTS を1度だけ読み込み、両方のデータを返す（効率化版）
+function getAdminData() {
+  try {
+    var studentsData = sh(SHEET_STUDENTS).getDataRange().getValues();
+    var nameMap = {};
+    for (var k = 1; k < studentsData.length; k++) {
+      nameMap[String(studentsData[k][1]).trim()] = String(studentsData[k][2]).trim();
+    }
+    return {
+      students:      getAdminStudentsWithMap(nameMap),
+      consultations: getAdminConsultationsWithMap(nameMap)
+    };
+  } catch(e) { return { students: [], consultations: [] }; }
+}
+
+// ── 管理者: 入室中生徒一覧 ──────────────────────────────────────
+function getAdminStudentsWithMap(nameMap) {
+  return _buildAdminStudents(nameMap);
+}
+function getAdminStudents() {
+  try {
+    var studentsData = sh(SHEET_STUDENTS).getDataRange().getValues();
+    var nameMap = {};
+    for (var k = 1; k < studentsData.length; k++) {
+      nameMap[String(studentsData[k][1]).trim()] = String(studentsData[k][2]).trim();
+    }
+    return _buildAdminStudents(nameMap);
+  } catch(e) { return []; }
+}
+function _buildAdminStudents(nameMap) {
+  try {
+    var activeData   = sh(SHEET_ACTIVE).getDataRange().getValues();
+    var now = new Date();
+    var results = [];
+    for (var i = 1; i < activeData.length; i++) {
+      var code   = String(activeData[i][0]).trim();
+      var rawST  = activeData[i][1];
+      var st     = rawST ? (rawST instanceof Date ? rawST : new Date(rawST)) : null;
+      var elapsed = st ? Math.round((now - st) / 60000) : 0;
+      var rawHB  = activeData[i][3];
+      var hbStr  = rawHB ? Utilities.formatDate(
+        rawHB instanceof Date ? rawHB : new Date(rawHB), 'Asia/Tokyo', 'HH:mm') : '未受信';
+      results.push({
+        code:        code,
+        name:        nameMap[code] || code,
+        elapsedMins: Math.max(0, elapsed),
+        lastHB:      hbStr
+      });
+    }
+    return results;
+  } catch(e) { return []; }
+}
+
+// ── 管理者: Q&Aキュー取得 ────────────────────────────────────────
+function getAdminConsultationsWithMap(nameMap) {
+  return _buildAdminConsultations(nameMap);
+}
+function getAdminConsultations() {
+  try {
+    var studentsData = sh(SHEET_STUDENTS).getDataRange().getValues();
+    var nameMap = {};
+    for (var k = 1; k < studentsData.length; k++) {
+      nameMap[String(studentsData[k][1]).trim()] = String(studentsData[k][2]).trim();
+    }
+    return _buildAdminConsultations(nameMap);
+  } catch(e) { return []; }
+}
+function _buildAdminConsultations(nameMap) {
+  try {
+    var data = sh(SHEET_CONSULT).getDataRange().getValues();
+    var results = [];
+    for (var i = data.length - 1; i >= 1; i--) {
+      var code = String(data[i][1]).trim();
+      results.push({
+        row:     i + 1,
+        time:    data[i][0] ? Utilities.formatDate(new Date(data[i][0]), 'Asia/Tokyo', 'M/d HH:mm') : '',
+        code:    code,
+        name:    nameMap[code] || code,
+        message: data[i][2] || '',
+        status:  data[i][3] || '未読',
+        reply:   data[i][4] || ''
+      });
+      if (results.length >= 30) break;
+    }
+    // 未読を先頭に
+    results.sort(function(a, b) {
+      if (a.status === '未読' && b.status !== '未読') return -1;
+      if (a.status !== '未読' && b.status === '未読') return 1;
+      return 0;
+    });
+    return results;
+  } catch(e) { return []; }
+}
+
+
+// ══════════════════════════════════════════════════════════════
+//  Bot投稿機能（タイムライン自動投稿）
+// ══════════════════════════════════════════════════════════════
+
+// 投稿スケジュール（時間帯ごとの件数）
+var BOT_SCHEDULE = {
+  8: 3,   // 8時台に3件
+  9: 1,   // 9時台に1件
+  10: 1,
+  11: 1,
+  13: 2,  // 13時台に2件
+  14: 2,
+  15: 2,
+  16: 2,
+  17: 3,
+  18: 3,
+  19: 2
+};
+
+// メイン関数（毎時トリガーで実行）
+function postBotTimeline() {
+  try {
+    // コーチがチェックイン中のみ Bot 投稿を実行
+    // （コーチ不在時はタイムラインを止める）
+    var coachSt = getCoachStatus();
+    if (!coachSt.isIn) return;
+
+    // Bot投稿が有効かチェック
+    var settingsData = sh('Bot設定').getDataRange().getValues();
+    var enabled = true;
+    for (var s = 1; s < settingsData.length; s++) {
+      if (settingsData[s][0] === 'bot_post_enabled' && settingsData[s][1] === 'FALSE') {
+        enabled = false;
+        break;
+      }
+    }
+    if (!enabled) return;
+
+    var now    = new Date();
+    var hour   = Number(Utilities.formatDate(now, 'Asia/Tokyo', 'H'));
+    var today  = jstDate(now);
+    var target = BOT_SCHEDULE[hour] || 0;
+    if (target === 0) return;
+
+    // 今日この時間帯の既投稿数をカウント
+    var histSheet = sh('Bot投稿履歴');
+    var histData  = histSheet.getDataRange().getValues();
+    var alreadyPosted = 0;
+    var recentNames   = [];
+    var recentMsgs    = [];
+
+    for (var h = histData.length - 1; h >= 1; h--) {
+      var row = histData[h];
+      if (String(row[0]) !== today) continue;
+      if (String(row[4]) === String(hour) + '時台') alreadyPosted++;
+      if (recentNames.length < 3) recentNames.push(row[2]);
+      if (recentMsgs.length  < 3) recentMsgs.push(row[3]);
+    }
+
+    var toPost = target - alreadyPosted;
+    if (toPost <= 0) return;
+
+    // キャラクター・文面プールを取得
+    var charData = sh('Botキャラクター').getDataRange().getValues();
+    var msgData  = sh('Bot文面').getDataRange().getValues();
+
+    var chars = [];
+    for (var c = 1; c < charData.length; c++) {
+      if (charData[c][1] === '有効') chars.push(charData[c][0]);
+    }
+    var msgs = [];
+    for (var m = 1; m < msgData.length; m++) {
+      if (msgData[m][2] === '有効') msgs.push(msgData[m][0]);
+    }
+    if (!chars.length || !msgs.length) return;
+
+    // 投稿実行
+    for (var p = 0; p < toPost; p++) {
+      // 直近3件と重複しないキャラ選択
+      var availChars = chars.filter(function(c) { return recentNames.indexOf(c) === -1; });
+      if (!availChars.length) availChars = chars;
+      var name = availChars[Math.floor(Math.random() * availChars.length)];
+
+      // 直近3件と重複しないメッセージ選択
+      var availMsgs = msgs.filter(function(m) { return recentMsgs.indexOf(m) === -1; });
+      if (!availMsgs.length) availMsgs = msgs;
+      var msg = availMsgs[Math.floor(Math.random() * availMsgs.length)];
+
+      // 学習報告シートに書き込み（ニックネーム付き = タイムラインに表示）
+      sh(SHEET_REPORT).appendRow([now, 'bot_' + name, msg, name]);
+      // 履歴記録
+      var timeStr = Utilities.formatDate(now, 'Asia/Tokyo', 'HH:mm');
+      histSheet.appendRow([today, timeStr, name, msg, hour + '時台']);
+
+      recentNames.unshift(name);
+      recentMsgs.unshift(msg);
+      if (recentNames.length > 3) recentNames.pop();
+      if (recentMsgs.length  > 3) recentMsgs.pop();
+
+      Utilities.sleep(800); // 0.8秒間隔
+    }
+  } catch(e) {
+    console.log('postBotTimeline error:', e.message);
+  }
+}
+
+// 30日以上前の Bot投稿履歴を削除（月1回程度手動実行）
+function cleanupBotHistory() {
+  var sheet    = sh('Bot投稿履歴');
+  var data     = sheet.getDataRange().getValues();
+  var cutoff   = new Date();
+  cutoff.setDate(cutoff.getDate() - 30);
+  var cutoffStr = jstDate(cutoff);
+  for (var i = data.length - 1; i >= 1; i--) {
+    if (String(data[i][0]) < cutoffStr) sheet.deleteRow(i + 1);
+  }
+}
+
+
+// ══════════════════════════════════════════════════════════════
+//  デモデータ生成（GASエディタから手動実行）
+//  実行後: s000099 / デモ 太郎 でログイン可能
+// ══════════════════════════════════════════════════════════════
+function setupDemoData() {
+  var DEMO_CODE = 's000099';
+  var DEMO_NAME = 'デモ 太郎';
+  var DEMO_NICK = 'たろう';
+  // タイムライン多様化用の架空ニックネーム（デモ専用）
+  var DEMO_TL_NICKS = ['ゆうと','さくら','けんと','あおい','りく','みく','はると','ことは','れん','そうた'];
+  var DEMO_GOAL = 20;
+
+  function prng(seed) {
+    var s = seed % 2147483647;
+    return function() {
+      s = (s * 16807) % 2147483647;
+      return (s - 1) / 2147483646;
+    };
+  }
+
+  var now = new Date();
+  var jstFmt = function(d) { return Utilities.formatDate(d, 'Asia/Tokyo', 'yyyy-MM-dd'); };
+
+  // ── 1. 生徒マスターに追加（重複チェック）────────────────────
+  var stSheet = sh(SHEET_STUDENTS);
+  var stData  = stSheet.getDataRange().getValues();
+  var found   = false;
+  for (var i = 1; i < stData.length; i++) {
+    if (String(stData[i][1]).trim() === DEMO_CODE) {
+      found = true;
+      stSheet.getRange(i + 1, 4).setValue(DEMO_GOAL);
+      break;
+    }
+  }
+  if (!found) stSheet.appendRow(['在籍中', DEMO_CODE, DEMO_NAME, DEMO_GOAL, new Date()]);
+
+  // ── 2. 既存デモデータを一括削除 ──────────────────────────
+  [sh(SHEET_STUDY), sh(SHEET_REPORT), sh(SHEET_CONSULT), sh(SHEET_LOGIN)].forEach(function(sheet) {
+    var d = sheet.getDataRange().getValues();
+    var toDelete = [];
+    for (var i = 1; i < d.length; i++) {
+      if (String(d[i][1]).trim() === DEMO_CODE) toDelete.push(i + 1);
+    }
+    for (var j = toDelete.length - 1; j >= 0; j--) sheet.deleteRow(toDelete[j]);
   });
-  el.innerHTML = html;
+
+  // ── 3. 90日分の勉強記録を一括生成 ────────────────────────
+  var subjects  = ['数学ⅠA','数学ⅡB','英語','現代文','古文','日本史','化学','物理'];
+  var studyRows  = [];
+  var reportRows = [];
+
+  for (var day = 90; day >= 0; day--) {
+    var r = prng(day * 997 + 13);
+    var date = new Date(now);
+    date.setDate(date.getDate() - day);
+    var dow       = date.getDay();
+    var isWeekend = dow === 0 || dow === 6;
+    var studyProb = day < 7 ? 0.9 : (isWeekend ? 0.68 : 0.78);
+    if (r() > studyProb) continue;
+
+    var baseMins = isWeekend ?
+      Math.round(90  + r() * 150) :
+      Math.round(60  + r() * 120);
+    if (r() < 0.18) baseMins = Math.round(240 + r() * 120);
+
+    date.setHours(isWeekend ? 9 : 18, Math.floor(r() * 30), 0, 0);
+    var startTime = new Date(date);
+    var numSubs   = r() < 0.35 ? 2 : 1;
+    var remaining = baseMins;
+
+    for (var s = 0; s < numSubs && remaining > 0; s++) {
+      var subMins = (s === numSubs - 1) ? remaining : Math.round(remaining * (0.4 + r() * 0.3));
+      if (subMins < 15) { remaining -= subMins; continue; }
+      remaining -= subMins;
+
+      var subj    = subjects[Math.floor(r() * subjects.length)];
+      var endTime = new Date(startTime.getTime() + subMins * 60000);
+      var sid     = 'demo_' + day + '_' + s + '_' + Math.floor(r() * 9999);
+
+      studyRows.push([sid, DEMO_CODE, startTime, endTime, subMins, jstFmt(startTime), subj]);
+
+      if (r() < 0.3) {
+        var posts = [
+          subj + 'を頑張っています💪', subj + '、今日で完全理解する！',
+          subj + 'の難しいところが見えてきた！', '集中できてる！' + subj + 'を攻略中🔥',
+          subj + 'の問題が解けた！嬉しい😊', 'Q &A今日も' + subj + 'をしっかりやります',
+          subj + '、少しずつ上達してる気がする✨', '今日は' + subj + 'に全力投球！'
+        ];
+        var postTime = new Date(startTime.getTime() + Math.floor(r() * subMins * 30000));
+        var tlNick=DEMO_TL_NICKS[Math.floor(r()*DEMO_TL_NICKS.length)];
+        reportRows.push([postTime, 'demo_'+tlNick, posts[Math.floor(r() * posts.length)], tlNick]);
+      }
+      startTime = endTime;
+    }
+
+    if (r() < 0.4) {
+      var intentions = [
+        subjects[Math.floor(r() * subjects.length)] + 'を完全攻略する！💪',
+        '今日も集中して頑張ります！',
+        '今日の目標：' + Math.round(baseMins/60*10)/10 + '時間勉強する',
+        '昨日より成長できるように頑張る✨', '志望校合格に向けて全力で！🔥',
+        '苦手克服の日！頑張ります', '集中モードでいきます！'
+      ];
+      var intentTime = new Date(date);
+      intentTime.setMinutes(intentTime.getMinutes() - 5);
+      var tlNick2=DEMO_TL_NICKS[Math.floor(r()*DEMO_TL_NICKS.length)];
+      reportRows.push([intentTime, 'demo_'+tlNick2, intentions[Math.floor(r() * intentions.length)], tlNick2]);
+    }
+  }
+
+  // 生存確認応答
+  for (var cr = 0; cr < 4; cr++) {
+    var crDate = new Date(now);
+    crDate.setDate(crDate.getDate() - (cr * 12 + 3));
+    crDate.setHours(20, 0, 0, 0);
+    var crNick=DEMO_TL_NICKS[cr%DEMO_TL_NICKS.length];
+    reportRows.push([crDate, 'demo_'+crNick, '✅ 引き続き勉強中！まだまだ頑張ります！', crNick]);
+  }
+
+  // ── 一括書き込み（appendRow×150回 → setValues×2回）──────
+  var studySheet  = sh(SHEET_STUDY);
+  var reportSheet = sh(SHEET_REPORT);
+  if (studyRows.length > 0) {
+    studySheet.getRange(studySheet.getLastRow() + 1, 1, studyRows.length, studyRows[0].length)
+              .setValues(studyRows);
+  }
+  if (reportRows.length > 0) {
+    reportSheet.getRange(reportSheet.getLastRow() + 1, 1, reportRows.length, reportRows[0].length)
+               .setValues(reportRows);
+  }
+
+  // ── 4. Q&A会話（返信付き）────────────────────────────────
+  var qaRows = [
+    [new Date(now.getTime()-65*86400000), DEMO_CODE, '数学の微分積分が全然わかりません。どこから勉強すれば良いですか？', '返信済',
+     '微分積分は「変化の速度」のイメージから入ると◎。まず極限の定義式 f\'(x)=lim[h→0](f(x+h)-f(x))/h を丁寧に理解し、教科書例題を3周しましょう！'],
+    [new Date(now.getTime()-51*86400000), DEMO_CODE, '英語の長文読解で時間が全然足りません。速読のコツを教えてください！', '返信済',
+     '①段落ごとのトピックセンテンスを先読み②接続詞(however/therefore)で流れを掴む③意味の塊で読む。毎日1本練習しましょう！'],
+    [new Date(now.getTime()-38*86400000), DEMO_CODE, '古文の助動詞が多すぎて覚えられません。効率的な暗記法はありますか？', '返信済',
+     '「意味・活用・接続」の3セットで覚えること。まず頻出9つ（き・けり・つ・ぬ・たり・り・む・べし・ず）を完璧に！毎朝一覧表を確認するルーティンがおすすめ。'],
+    [new Date(now.getTime()-22*86400000), DEMO_CODE, '模試の数学で時間が足りなくなります。時間配分のアドバイスをください', '返信済',
+     '先に全問を1分でざっと確認→得意な順に解く。15分粘って解けない問題は飛ばす勇気も大事。本番2ヶ月前から時計を計った過去問演習を！'],
+    [new Date(now.getTime()-8*86400000),  DEMO_CODE, '志望校の過去問を初めて解いたら全然点数が取れませんでした。諦めた方がいいですか？', '返信済',
+     '大丈夫！最初に点数が取れないのは当然です。今は「実力把握」と「出題傾向確認」が目的。今の実力と合格点のギャップを逆算して計画を立てましょう！']
+  ];
+  var consultSheet = sh(SHEET_CONSULT);
+  consultSheet.getRange(consultSheet.getLastRow() + 1, 1, qaRows.length, 5).setValues(qaRows);
+
+  // ── 5. ログイン記録（一括）───────────────────────────────
+  var loginRows = [];
+  for (var ld = 85; ld >= 0; ld -= Math.floor(2 + Math.random() * 3)) {
+    var lDate = new Date(now);
+    lDate.setDate(lDate.getDate() - ld);
+    lDate.setHours(18, 0, 0, 0);
+    loginRows.push([lDate, DEMO_CODE, '入室', '']);
+    loginRows.push([new Date(lDate.getTime() + 120 * 60000), DEMO_CODE, '退室', '120分']);
+  }
+  var loginSheet = sh(SHEET_LOGIN);
+  if (loginRows.length > 0) {
+    loginSheet.getRange(loginSheet.getLastRow() + 1, 1, loginRows.length, 4).setValues(loginRows);
+  }
+
+  SpreadsheetApp.flush();
+  return [
+    '✅ デモデータ生成完了！',
+    '━━━━━━━━━━━━━━━━',
+    '📱 ログイン情報:',
+    '  生徒コード: s000099',
+    '  氏名: デモ 太郎',
+    '  ニックネーム: たろう（初回ログイン時に入力）',
+    '━━━━━━━━━━━━━━━━',
+    '90日分の勉強記録・タイムライン投稿・Q&A会話を生成しました。'
+  ].join('\n');
 }
 
-// ════════════════════════════════════════════════
-//  POLLING
-// ════════════════════════════════════════════════
-function startPoll() {
-  stopPoll(); fetchLive();
-  POLL_IV = setInterval(fetchLive, 45000);
-}
-function stopPoll() { if (POLL_IV) { clearInterval(POLL_IV); POLL_IV = null; } }
-
-function fetchLive() {
-  gasCall('getLiveStats', {},
-    function(r) { document.getElementById('hdr-live-num').textContent = r.activeCount; },
-    function() {}
-  );
-}
-
-function fetchLiveForLogin() {
-  gasCall('getLiveStats', {},
-    function(r) { document.getElementById('login-live-num').textContent = r.activeCount; },
-    function()  { document.getElementById('login-live-num').textContent = '0'; }
-  );
+function clearDemoData() {
+  var DEMO_CODE = 's000099';
+  function clearSheet(sheet) {
+    var data = sheet.getDataRange().getValues();
+    for (var i = data.length - 1; i >= 1; i--) {
+      if (String(data[i][1]).trim() === DEMO_CODE) sheet.deleteRow(i + 1);
+    }
+  }
+  [sh(SHEET_STUDY), sh(SHEET_REPORT), sh(SHEET_CONSULT), sh(SHEET_LOGIN)].forEach(clearSheet);
+  var stData = sh(SHEET_STUDENTS).getDataRange().getValues();
+  for (var i = stData.length - 1; i >= 1; i--) {
+    if (String(stData[i][1]).trim() === DEMO_CODE) sh(SHEET_STUDENTS).deleteRow(i + 1);
+  }
+  return 'デモデータを削除しました';
 }
 
-// ════════════════════════════════════════════════
-//  MODALS
-// ════════════════════════════════════════════════
-function openReportModal()  { document.getElementById('modal-report').classList.add('open');  document.getElementById('report-input').focus(); }
-function openConsultModal() { document.getElementById('modal-consult').classList.add('open'); document.getElementById('consult-input').focus(); }
-function openGoalModal()    {
-  if (DASH_DATA) { document.getElementById('goal-range').value = DASH_DATA.goalHours; document.getElementById('goal-val').textContent = DASH_DATA.goalHours; }
-  document.getElementById('modal-goal').classList.add('open');
-}
-function closeModal(id) { document.getElementById(id).classList.remove('open'); }
-
-function submitReport() {
-  var msg = document.getElementById('report-input').value.trim();
-  if (!msg) { showToast('内容を入力してください'); return; }
-  closeModal('modal-report');
-  gasCall('postReport', { studentCode: U.studentCode, message: msg },
-    function() {
-      document.getElementById('report-input').value = '';
-      showToast('学習報告を投稿しました 📝');
-      gasCall('getRecentReports', {}, renderFeed, function() {});
-    },
-    function() { showToast('エラーが発生しました'); }
-  );
-}
-
-function submitConsult() {
-  var msg = document.getElementById('consult-input').value.trim();
-  if (!msg) { showToast('内容を入力してください'); return; }
-  closeModal('modal-consult');
-  gasCall('postConsultation', { studentCode: U.studentCode, message: msg },
-    function() { document.getElementById('consult-input').value = ''; showToast('コーチに送信しました 💬 返信をお待ちください'); },
-    function() { showToast('エラーが発生しました'); }
-  );
+// ── 初期セットアップ（1回のみ実行） ─────────────────────────────
+function setupSheets() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var config = [
+    { name: SHEET_STUDENTS, headers: ['ステータス', '生徒コード', '氏名', '週間目標時間(h)', '登録日'] },
+    { name: SHEET_STUDY,    headers: ['セッションID', '生徒コード', '開始時刻', '終了時刻', '勉強時間(分)', '日付', '科目'] },
+    { name: SHEET_LOGIN,    headers: ['タイムスタンプ', '生徒コード', 'アクション', '備考'] },
+    { name: SHEET_ACTIVE,   headers: ['生徒コード', '開始時刻', 'セッションID'] },
+    { name: SHEET_CONSULT,  headers: ['タイムスタンプ', '生徒コード', 'メッセージ', 'ステータス'] },
+    { name: SHEET_REPORT,   headers: ['タイムスタンプ', '生徒コード', 'メッセージ', 'ニックネーム'] },
+    { name: SHEET_RATING,     headers: ['タイムスタンプ', '生徒コード', 'セッションID', '満足度(1-5)', '勉強時間(分)'] },
+  ];
+  config.forEach(function(cfg) {
+    var sheet = ss.getSheetByName(cfg.name);
+    if (!sheet) sheet = ss.insertSheet(cfg.name);
+    var r = sheet.getRange(1, 1, 1, cfg.headers.length);
+    r.setValues([cfg.headers]);
+    r.setFontWeight('bold').setBackground('#104854').setFontColor('#FFFFFF').setHorizontalAlignment('center');
+    sheet.setFrozenRows(1);
+    sheet.setColumnWidths(1, cfg.headers.length, 160);
+  });
+  var st = ss.getSheetByName(SHEET_STUDENTS);
+  if (st.getLastRow() === 1) {
+    st.appendRow(['在籍中', 's000001', 'テスト 太郎', 10, new Date()]);
+    st.appendRow(['在籍中', 's000002', 'サンプル 花子', 15, new Date()]);
+  }
+  return '✅ セットアップ完了！';
 }
 
-function submitGoal() {
-  var h = Number(document.getElementById('goal-range').value);
-  if (!h || h < 1) return;
-  closeModal('modal-goal');
-  gasCall('setWeeklyGoal', { studentCode: U.studentCode, hours: h },
-    function() {
-      if (U) { U.weeklyGoalHours = h; localStorage.setItem('ara_goal', h); }
-      showToast('目標を ' + h + '時間/週 に設定しました 🎯');
-      loadDash();
-    },
-    function() { showToast('エラーが発生しました'); }
-  );
+// ★ 旧 cleanupStaleSessions() はここにあったが、_cleanupActiveSheet() に統合済み
+//   （startStudy() から呼ばれる。シート読み込み回数を2回→1回に削減）。
+//   同等の処理が必要な場合は _cleanupActiveSheet(null) を呼ぶこと。
+
+// ── 全ラップ一括記録（退室時・タブ閉じ時に呼ばれる） ────────────────
+// lapsJson: [{subject, mins}, ...] の JSON 文字列
+function recordAllLaps(studentCode, sessionId, lapsJson, satisfaction, feedback) {
+  try {
+    var lapData   = JSON.parse(lapsJson || '[]');
+    var now       = new Date();
+    var today     = jstDate(now);
+    var totalMins = 0;
+    for (var i = 0; i < lapData.length; i++) {
+      var mins = Math.max(0, Math.round(Number(lapData[i].mins || 0)));
+      if (mins >= 1) {
+        sh(SHEET_STUDY).appendRow([
+          sessionId + '_lap' + i,
+          studentCode,
+          now,
+          now,
+          mins,
+          today,
+          lapData[i].subject || ''
+        ]);
+        totalMins += mins;
+      }
+    }
+    _removeActiveSession(sessionId);
+    sh(SHEET_LOGIN).appendRow([now, studentCode, '退室', totalMins + '分（' + lapData.length + '科目）']);
+
+    // ④ 満足度・改善案を評価記録シートに保存
+    // 満足度が未選択でも改善案があれば保存する
+    var rating   = Number(satisfaction) || 0;
+    var fbText   = String(feedback || '').trim();
+    if (rating >= 1 || fbText.length > 0) {
+      var rSheet = sh(SHEET_RATING);
+      if (rSheet) rSheet.appendRow([now, studentCode, sessionId, rating || '', totalMins, fbText]);
+    }
+
+    return { success: true, totalMins: totalMins };
+  } catch(e) { return { success: false, message: e.message }; }
 }
 
-// ════════════════════════════════════════════════
-//  UTILITIES
-// ════════════════════════════════════════════════
-function fmtTime(s) { return pad(Math.floor(s/3600))+':'+pad(Math.floor((s%3600)/60))+':'+pad(s%60); }
-function pad(n)     { return String(n).padStart(2,'0'); }
-function esc(str)   { return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-
-var TOAST_TO = null;
-function showToast(msg) {
-  var el = document.getElementById('toast');
-  el.textContent = msg; el.classList.add('show');
-  if (TOAST_TO) clearTimeout(TOAST_TO);
-  TOAST_TO = setTimeout(function(){ el.classList.remove('show'); }, 3000);
+function recordLap(studentCode, sessionId, lapStartTime, lapEndTime, netMins, subject) {
+  try {
+    var start = new Date(lapStartTime);
+    var end   = new Date(lapEndTime);
+    var mins  = (netMins != null) ? Math.round(Number(netMins)) : Math.round((end - start) / 60000);
+    // 30秒未満は切り捨て、30秒以上は最低1分として記録
+    if ((end - start) < 30000) return { success: true };
+    if (mins < 1) mins = 1;
+    sh(SHEET_STUDY).appendRow([sessionId, studentCode, start, end, mins, jstDate(start), subject || '']);
+    return { success: true };
+  } catch(e) { return { success: false }; }
 }
-function showLoading(show) { document.getElementById('loading').classList.toggle('hidden', !show); }
-function showErr(msg)  { var el = document.getElementById('login-err'); el.textContent = msg; el.style.display = 'block'; }
-function clearErr()    { document.getElementById('login-err').style.display = 'none'; }
-</script>
-</body>
-</html>
+
+// ── ハートビート更新（クライアントから90秒ごとに呼ばれる） ───────
+function updateHeartbeat(studentCode, sessionId, subject) {
+  try {
+    var sheet = sh(SHEET_ACTIVE);
+    var data  = sheet.getDataRange().getValues();
+    var now   = new Date();
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][2]).trim() === String(sessionId).trim()) {
+        sheet.getRange(i + 1, 4).setValue(now.toISOString()); // D: HB
+        if (subject) sheet.getRange(i + 1, 6).setValue(subject); // F: 現在の科目
+        return { success: true };
+      }
+    }
+    return { success: false };
+  } catch (e) { return { success: false }; }
+}
