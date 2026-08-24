@@ -365,15 +365,27 @@ function _splashFallback() {
 }
 
 function _splashProceed() {
-  // セッションデータを破棄
-  ['ara_sid','ara_stime'].forEach(function(k){localStorage.removeItem(k)});
-  U = null; SESSION = null;
   // 管理者の場合
   if (IS_ADMIN) {
+    ['ara_sid','ara_stime','ara_subject'].forEach(function(k){localStorage.removeItem(k)});
+    U = null; SESSION = null;
     showS('s-admin-login');
     setTimeout(function(){var e=document.getElementById('admin-pwd');if(e)e.focus();},100);
     return;
   }
+  // ★ バグ修正：以前はここで無条件に ara_sid/ara_stime を破棄してログイン画面に
+  //   戻していたため、画面スリープ等でページがリロードされると「勉強中セッションが
+  //   進行中でも問答無用でログイン画面に戻される（サーバー側のセッションは残ったまま）」
+  //   という状態になっていた。localStorageに勉強中セッションの痕跡があれば、
+  //   まずサーバーに生存確認（updateHeartbeat）を行い、有効なら学習中画面へ復帰する。
+  if (lsg('ara_sid') && typeof _restoreActiveSession === 'function') {
+    _restoreActiveSession(function(restored){
+      if (!restored) { U = null; SESSION = null; showS('s-login'); }
+    });
+    return;
+  }
+  ['ara_sid','ara_stime','ara_subject'].forEach(function(k){localStorage.removeItem(k)});
+  U = null; SESSION = null;
   showS('s-login');
 }
 
@@ -1383,6 +1395,7 @@ function switchSubject(el){
   // 新ラップ開始
   studySecsAtLapStart=currentSecs;
   selSubj=newSubj;
+  lss({ara_subject:selSubj});
   document.getElementById('slbl').textContent=newSubj+' · 勉強中';
   closeModal('modal-subject-switch');
   if(U){gasCall('postReport',{studentCode:U.studentCode,message:'📚 '+oldSubj+' → '+newSubj+' に切り替えました',nickname:lsg('ara_nick')||''},null,null);}
@@ -1561,7 +1574,7 @@ function clearAndGo(){
   if(confirmCountdownIv){clearInterval(confirmCountdownIv);confirmCountdownIv=null;}
   stopMediaSession();
   totalBrkMs=0;brkStart=null;studySecsAtLapStart=0;laps=[];
-  ['ara_code','ara_name','ara_goal','ara_sid','ara_stime'].forEach(function(k){localStorage.removeItem(k)});
+  ['ara_code','ara_name','ara_goal','ara_sid','ara_stime','ara_subject'].forEach(function(k){localStorage.removeItem(k)});
   document.getElementById('ci').value='';document.getElementById('li-name').value='';
   document.getElementById('tdisp').textContent='00:00:00';document.getElementById('tdisp').className='tdisp';
   showS('s-login');fetchLiveLogin();toast('ログアウトしました');
@@ -1605,7 +1618,7 @@ function doEnterRoom(withPost){
   gasCall('startStudy',{studentCode:U.studentCode,nickname:lsg('ara_nick')||''},function(sr){
     showLoading(false);SESSION={sessionId:sr.sessionId,startTime:new Date(sr.startTime)};
     studySecsAtLapStart=0;laps=[];
-    lss({ara_sid:sr.sessionId,ara_stime:sr.startTime});
+    lss({ara_sid:sr.sessionId,ara_stime:sr.startTime,ara_subject:selSubj});
     // 参加ログをタイムラインに投稿（常時）
     var joinNick=lsg('ara_nick')||U.name;
     var joinMsg=joinNick+' が参加しました！👋';
@@ -1619,6 +1632,46 @@ function doEnterRoom(withPost){
     qaIv=setInterval(function(){if(SESSION)loadQA();},90000); // 90秒ごとに返信チェック
     loadActive();toast('入室しました 🎯');
   },function(){showLoading(false);toast('接続エラーが発生しました')});
+}
+// ★ バグ修正：画面スリープ・ブラウザのバックグラウンド回収等でページが
+//   リロードされた際に、進行中の学習セッションへ復帰するための関数。
+//   （以前はこの復元処理が存在せず、保存していたara_sid等が一度も
+//    読み込まれないまま「ログイン画面に戻される」原因になっていた）
+function _restoreActiveSession(onDone){
+  var code=lsg('ara_code'), name=lsg('ara_name'), goal=lsg('ara_goal');
+  var sid=lsg('ara_sid'), stime=lsg('ara_stime'), subj=lsg('ara_subject');
+  if(!code||!name||!sid||!stime){ onDone(false); return; }
+  U={studentCode:code,name:name,weeklyGoalHours:Number(goal)||10};
+  SESSION={sessionId:sid,startTime:new Date(stime)};
+  selSubj=subj||selSubj;
+  gasCall('updateHeartbeat',{studentCode:code,sessionId:sid,subject:selSubj},function(hb){
+    if(!hb||!hb.success){
+      // サーバー側で既にセッションが終了・クリーンアップ済み
+      U=null;SESSION=null;
+      ['ara_sid','ara_stime','ara_subject'].forEach(function(k){localStorage.removeItem(k)});
+      onDone(false);
+      return;
+    }
+    var finish=function(dash){
+      DASH=dash||null;
+      prevMins=(dash&&dash.totalMins)||0;
+      if(dash&&dash.goalHours)U.weeklyGoalHours=dash.goalHours;
+      totalBrkMs=0;brkStart=null;inBrk=false;inTempPause=false;
+      studySecsAtLapStart=0;laps=[];
+      showS('s-active');
+      var slbl=document.getElementById('slbl');if(slbl)slbl.textContent=selSubj+' · 勉強中';
+      startTimerDisplay();startHeartbeat();startConfirmTimer();startCoachStatusPoll();
+      if(tlIv)clearInterval(tlIv);tlIv=setInterval(loadTimeline,60000);
+      if(qaIv)clearInterval(qaIv);qaIv=setInterval(function(){if(SESSION)loadQA();},90000);
+      loadActive();
+      toast('学習セッションを再開しました 🔄');
+      onDone(true);
+    };
+    gasCall('getDashboard',{studentCode:code},finish,function(){finish(null);});
+  },function(){
+    // 通信エラー時はセッションを破棄せず、次回ロード時に再試行できるようにする
+    onDone(false);
+  });
 }
 // ══════════════════════════════════════════════
 // 勉強中タイマー・休憩
@@ -1747,7 +1800,7 @@ function exitToHome(){
   _qaLoadCnt=0;_prevReplyCnt=0; // Q&A通知リセット
   _tlReadAt=0; // タイムライン既読リセット
   clearQABadge();
-  localStorage.removeItem('ara_sid');localStorage.removeItem('ara_stime');
+  localStorage.removeItem('ara_sid');localStorage.removeItem('ara_stime');localStorage.removeItem('ara_subject');
   var td=document.getElementById('tdisp');if(td){td.textContent='00:00:00';td.className='tdisp';}
   var ls=document.getElementById('lap-summary');if(ls)ls.classList.add('hidden');
   showS('s-pre');
